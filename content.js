@@ -201,13 +201,16 @@ function openSideView(url) {
   const elements = ensurePanel();
   const wasOpen = document.documentElement.classList.contains(OPEN_CLASS);
 
+  // 在添加 OPEN_CLASS 之前获取真实的滚动高度，否则 page-bridge 拦截器会返回虚拟滚动条的值（而此时其尚未初始化，为 0）
+  const initialScrollTop = !wasOpen ? getDocumentScrollTop() : 0;
+
   applySideViewWidth(preferredSideViewWidth);
   document.documentElement.classList.add(OPEN_CLASS);
   elements.panel.setAttribute("aria-hidden", "false");
 
   // 如果是从关闭状态打开的，将外部滚动条切换到主内容区域
   if (!wasOpen) {
-    transferDocumentScrollToMainPane();
+    transferDocumentScrollToMainPane(initialScrollTop);
   }
 
   // 加载目标 URL。如果是同一个 URL 则尝试替换历史记录刷新
@@ -446,9 +449,7 @@ function applySideViewWidth(width) {
 /**
  * 转移页面的滚动条控制权到左侧的主面板上，避免在分栏时发生异常滚动
  */
-function transferDocumentScrollToMainPane() {
-  const scrollTop = getDocumentScrollTop();
-
+function transferDocumentScrollToMainPane(scrollTop) {
   window.requestAnimationFrame(() => {
     window.scrollTo(0, 0);
     setMainPaneScrollTop(scrollTop);
