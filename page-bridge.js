@@ -7,6 +7,8 @@ if (window.location.hostname === HOSTNAME) {
   if (window.top !== window) {
     // 处于 iframe（分栏侧边栏）内时，拦截侧边栏状态保存
     initSidebarSaveBridge();
+    // 监听来自主页面的 SPA 导航指令
+    initNavigationBridge();
   } else {
     // 处于主页面时，拦截滚动事件同步给虚拟滚动条
     initMainPageScrollBridge();
@@ -123,6 +125,29 @@ function initMainPageScrollBridge() {
             }
             return originalDesc.get.call(this);
           }
+        });
+      }
+    } catch(e) {
+      // 忽略无法重新定义的错误
+    }
+  });
+
+  // 5. 拦截 document.documentElement 的 scrollHeight 和 clientHeight
+  // 分栏模式下 html 被设为 height:100vh; overflow:hidden，导致 scrollHeight 等于视口高度
+  // Discourse 的无限滚动检查 scrollTop + innerHeight >= scrollHeight 时会始终为 true，不断触发加载
+  ['scrollHeight', 'clientHeight'].forEach(prop => {
+    try {
+      const originalDesc = Object.getOwnPropertyDescriptor(Element.prototype, prop);
+      if (originalDesc) {
+        Object.defineProperty(document.documentElement, prop, {
+          get: function() {
+            if (isSideViewOpen()) {
+              const scroller = getVirtualScroller();
+              if (scroller) return originalDesc.get.call(scroller);
+            }
+            return originalDesc.get.call(this);
+          },
+          configurable: true
         });
       }
     } catch(e) {
@@ -438,5 +463,52 @@ function defineGetter(target, key, value) {
     configurable: true,
     enumerable: true,
     get: () => value
+  });
+}
+
+/**
+ * 初始化导航桥接：监听主页面发来的 postMessage，使用 Discourse SPA 路由进行导航
+ * 此函数运行在 iframe 内的 MAIN world，可以访问 DiscourseURL 等页面全局变量
+ */
+function initNavigationBridge() {
+  if (window.__dsSideviewNavigationBridgeInstalled) {
+    return;
+  }
+
+  window.__dsSideviewNavigationBridgeInstalled = true;
+
+  window.addEventListener("message", (event) => {
+    // 只接受同源消息
+    if (event.origin !== window.location.origin) {
+      return;
+    }
+
+    const data = event.data;
+    if (!data || data.type !== "ds-sideview-navigate") {
+      return;
+    }
+
+    const path = data.path;
+    if (typeof path !== "string" || !path.startsWith("/t/")) {
+      return;
+    }
+
+    // 优先使用 DiscourseURL.routeTo
+    if (window.DiscourseURL && typeof window.DiscourseURL.routeTo === "function") {
+      window.DiscourseURL.routeTo(path);
+      return;
+    }
+
+    // 备选：Ember 容器
+    const container = window.Discourse?.__container__;
+    if (container) {
+      const router = container.lookup("service:router");
+      if (router && typeof router.transitionTo === "function") {
+        router.transitionTo(path);
+        return;
+      }
+    }
+
+    window.location.href = path;
   });
 }
