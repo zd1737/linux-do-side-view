@@ -21,6 +21,37 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: 更新版本号并提交
+        run: |
+          # 提取纯数字版本号，移除可能包含的 'v' 前缀 (如 v1.2.0 -> 1.2.0)
+          VERSION="${TAG_NAME#v}"
+          echo "更新 manifest.json 版本号为: $VERSION"
+          
+          # 使用 jq 更新 manifest.json
+          jq ".version = \"$VERSION\"" manifest.json > tmp.json && mv tmp.json manifest.json
+          
+          # 配置 git 提交信息
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          
+          # 检查是否有文件变更
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: bump version to $VERSION [skip ci]"
+            
+            # 查找当前 tag 所在的远程分支
+            BRANCH=$(git branch -r --contains ${{ github.sha }} | grep -v HEAD | head -n 1 | sed 's/^[ \t]*origin\///')
+            
+            if [ -n "$BRANCH" ]; then
+              echo "将更新推送到分支: $BRANCH"
+              git push origin "HEAD:$BRANCH"
+            else
+              echo "未找到包含该 commit 的远程分支，跳过推送。"
+            fi
+          else
+            echo "版本号已经是 $VERSION，无需提交更改。"
+          fi
+
       - name: 准备扩展文件
         run: |
           mkdir -p release-package
