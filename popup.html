@@ -153,9 +153,19 @@
       padding: 12px 20px;
       border-top: 1px solid var(--border-color);
       font-size: 11px;
-      color: var(--text-muted);
       text-align: center;
       background: var(--surface-color);
+    }
+
+    .footer a {
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+
+    .footer a:hover {
+      color: var(--primary-color);
+      text-decoration: underline;
     }
   </style>
 </head>
@@ -195,7 +205,7 @@
   </div>
 
   <div class="footer">
-    Linux.do SideView
+    <a href="https://github.com/zd1737/linux-do-side-view" target="_blank" rel="noopener noreferrer">Linux.do SideView</a>
   </div>
 
   <script src="popup.js"></script>
