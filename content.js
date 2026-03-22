@@ -14,6 +14,14 @@ const RESIZING_CLASS = "ds-sideview-resizing";
 const MIN_SPLIT_WIDTH = 1100; // 启用分栏模式的最小窗口宽度
 const MIN_SIDEVIEW_WIDTH = 360; // 侧边栏最小宽度
 const MIN_MAIN_WIDTH = 360; // 主视图区域最小宽度
+
+// 版本检测相关常量
+const UPDATE_CHECK_KEY = "ds-sideview-update-check";
+const UPDATE_DISMISSED_KEY = "ds-sideview-update-dismissed";
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 小时
+const GITHUB_RELEASE_API = "https://api.github.com/repos/zd1737/linux-do-side-view/releases/latest";
+const GITHUB_RELEASE_URL = "https://github.com/zd1737/linux-do-side-view/releases/latest";
+const UPDATE_TOAST_ID = "ds-sideview-update-toast";
 const DEFAULT_SIDEVIEW_WIDTH_RATIO = 0.5; // 默认侧边栏宽度占窗口的比例
 const WIDTH_STORAGE_KEY = "ds-sideview-width"; // 存储自定义宽度的 key
 
@@ -59,6 +67,8 @@ function initTopLevel() {
   window.addEventListener("keydown", handleKeydown);
   // 监听窗口大小变化调整布局
   window.addEventListener("resize", handleResize);
+  // 检查新版本
+  checkForUpdate();
 }
 
 /**
@@ -696,4 +706,94 @@ function createRafScheduler(fn) {
       fn();
     });
   };
+}
+
+/**
+ * 检查是否有新版本可用
+ */
+function checkForUpdate() {
+  try {
+    const lastCheck = Number(localStorage.getItem(UPDATE_CHECK_KEY) || "0");
+    if (Date.now() - lastCheck < UPDATE_CHECK_INTERVAL_MS) {
+      return;
+    }
+  } catch {
+    return;
+  }
+
+  const currentVersion = chrome.runtime.getManifest().version;
+
+  fetch(GITHUB_RELEASE_API, { cache: "no-cache" })
+    .then(res => res.ok ? res.json() : null)
+    .then(data => {
+      try {
+        localStorage.setItem(UPDATE_CHECK_KEY, String(Date.now()));
+      } catch {}
+
+      if (!data || !data.tag_name) return;
+
+      const latestVersion = data.tag_name.replace(/^v/, "");
+      if (!isNewerVersion(currentVersion, latestVersion)) return;
+
+      // 检查用户是否已关闭过该版本的提示
+      try {
+        if (localStorage.getItem(UPDATE_DISMISSED_KEY) === latestVersion) return;
+      } catch {}
+
+      showUpdateToast(latestVersion);
+    })
+    .catch(() => {});
+}
+
+/**
+ * 比较版本号，判断 latest 是否比 current 更新
+ */
+function isNewerVersion(current, latest) {
+  const a = current.split(".").map(Number);
+  const b = latest.split(".").map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] || 0;
+    const y = b[i] || 0;
+    if (y > x) return true;
+    if (y < x) return false;
+  }
+  return false;
+}
+
+/**
+ * 显示版本更新 Toast 通知
+ */
+function showUpdateToast(version) {
+  if (document.getElementById(UPDATE_TOAST_ID)) return;
+
+  const toast = document.createElement("div");
+  toast.id = UPDATE_TOAST_ID;
+
+  const text = document.createElement("a");
+  text.href = GITHUB_RELEASE_URL;
+  text.target = "_blank";
+  text.rel = "noopener noreferrer";
+  text.className = "ds-update-toast-link";
+  text.textContent = `SideView 发现新版本 v${version}，点击前往下载`;
+
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "ds-update-toast-close";
+  closeBtn.type = "button";
+  closeBtn.setAttribute("aria-label", "关闭");
+  closeBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M13 1L1 13M1 1L13 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+  closeBtn.addEventListener("click", () => {
+    toast.remove();
+    try {
+      localStorage.setItem(UPDATE_DISMISSED_KEY, version);
+    } catch {}
+  });
+
+  toast.appendChild(text);
+  toast.appendChild(closeBtn);
+  document.body.appendChild(toast);
+
+  // 8 秒后自动消失
+  setTimeout(() => {
+    if (toast.isConnected) toast.remove();
+  }, 8000);
 }

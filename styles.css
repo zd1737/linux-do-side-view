@@ -276,3 +276,59 @@ html.ds-sideview-open #ds-sideview-panel {
   background: #fff;
   display: block;
 }
+
+/* 版本更新 Toast 通知 */
+#ds-sideview-update-toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 9999999;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.92);
+  color: #f1f5f9;
+  font-size: 14px;
+  line-height: 1.4;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(8px);
+  animation: ds-toast-in 0.3s ease;
+}
+
+@keyframes ds-toast-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+#ds-sideview-update-toast .ds-update-toast-link {
+  color: #93c5fd;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+#ds-sideview-update-toast .ds-update-toast-link:hover {
+  text-decoration: underline;
+  color: #bfdbfe;
+}
+
+#ds-sideview-update-toast .ds-update-toast-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+#ds-sideview-update-toast .ds-update-toast-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
