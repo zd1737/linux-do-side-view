@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 准备扩展文件
         run: |
@@ -39,8 +41,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # 获取上一个 tag，如果找不到则为空
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          # 生成更新日志 (changelog)
+          if [ -z "$PREVIOUS_TAG" ]; then
+            git log --pretty=format:"* %s (%h)" > changelog.txt
+          else
+            git log --pretty=format:"* %s (%h)" ${PREVIOUS_TAG}..HEAD > changelog.txt
+          fi
+
           if gh release view "${TAG_NAME}" > /dev/null 2>&1; then
+            # 更新已有 Release 的说明和附件
+            gh release edit "${TAG_NAME}" --notes-file changelog.txt
             gh release upload "${TAG_NAME}" "${ZIP_NAME}" --clobber
           else
-            gh release create "${TAG_NAME}" "${ZIP_NAME}" --title "${TAG_NAME}" --generate-notes
+            # 创建新 Release 并附带更新日志
+            gh release create "${TAG_NAME}" "${ZIP_NAME}" --title "${TAG_NAME}" --notes-file changelog.txt
           fi
