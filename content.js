@@ -45,6 +45,11 @@ let activeResize = null; // 当前拖拽调整宽度的状态
 let iframeFirstLoaded = false; // iframe 是否已完成首次加载
 let activeTopicStyleElement = null; // 用于高亮当前阅读话题的 style 元素
 
+let dimOpacity = null; // 当前应用的遮罩透明度百分比
+let dimDuration = null; // 当前应用的遮罩过渡时间
+const DIM_OPACITY_KEY = "ds-sideview-dim-opacity";
+const DIM_DURATION_KEY = "ds-sideview-dim-duration";
+
 // 初始化入口
 if (window.location.hostname === HOSTNAME) {
   if (window.top === window) {
@@ -62,6 +67,7 @@ if (window.location.hostname === HOSTNAME) {
  */
 function initTopLevel() {
   initStoredSideViewWidth();
+  initDimSetting();
   // 监听全局点击事件，必须在捕获阶段拦截
   document.addEventListener("click", handleDocumentClick, true);
   // 监听按键（Esc关闭侧边栏）
@@ -70,6 +76,80 @@ function initTopLevel() {
   window.addEventListener("resize", handleResize);
   // 检查新版本
   checkForUpdate();
+}
+
+/**
+ * 初始化遮罩设置（透明度和动画时间）
+ */
+function initDimSetting() {
+  if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+    chrome.storage.local.get([DIM_OPACITY_KEY, DIM_DURATION_KEY], (result) => {
+      // 获取保存的透明度
+      if (result[DIM_OPACITY_KEY] !== undefined) {
+        dimOpacity = result[DIM_OPACITY_KEY];
+      }
+      
+      // 获取保存的过渡时间
+      if (result[DIM_DURATION_KEY] !== undefined) {
+        dimDuration = result[DIM_DURATION_KEY];
+      }
+      
+      applyDimClass();
+    });
+
+    // 监听设置在其他页面或 popup 中的改变
+    chrome.storage.onChanged.addListener((changes, area) => {
+      let changed = false;
+      if (area === 'local' && changes[DIM_OPACITY_KEY]) {
+        dimOpacity = changes[DIM_OPACITY_KEY].newValue;
+        changed = true;
+      }
+      
+      if (area === 'local' && changes[DIM_DURATION_KEY]) {
+        dimDuration = changes[DIM_DURATION_KEY].newValue;
+        changed = true;
+      }
+      
+      if (changed) applyDimClass();
+    });
+
+    // 监听 popup 拖拽滑块发送来的实时预览消息
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message.type === "ds-dim-preview") {
+        dimOpacity = message.value;
+        applyDimClass();
+      } else if (message.type === "ds-dim-duration-preview") {
+        dimDuration = message.value;
+        applyDimClass();
+      }
+    });
+  } else {
+    applyDimClass();
+  }
+}
+
+/**
+ * 应用当前的遮罩透明度和过渡时间到页面 CSS 变量及类名上
+ */
+function applyDimClass() {
+  if (dimDuration !== null) {
+    document.documentElement.style.setProperty('--ds-mask-duration', (dimDuration / 10).toFixed(1) + 's');
+  } else {
+    document.documentElement.style.removeProperty('--ds-mask-duration');
+  }
+
+  if (dimOpacity !== null) {
+    // 将百分比(0-100)转换为小数(0-1)赋予 CSS 变量
+    document.documentElement.style.setProperty('--ds-mask-opacity', (dimOpacity / 100).toString());
+    if (dimOpacity === 0) {
+      document.documentElement.classList.remove("ds-dim-enabled");
+    } else {
+      document.documentElement.classList.add("ds-dim-enabled");
+    }
+  } else {
+    document.documentElement.style.removeProperty('--ds-mask-opacity');
+    document.documentElement.classList.add("ds-dim-enabled");
+  }
 }
 
 /**
@@ -338,6 +418,20 @@ function ensurePanel() {
     panel = document.createElement("section");
     panel.id = PANEL_ID;
     panel.setAttribute("aria-hidden", "true");
+  }
+
+  let mainMask = document.getElementById("ds-main-mask");
+  if (!mainMask) {
+    mainMask = document.createElement("div");
+    mainMask.id = "ds-main-mask";
+    document.body.appendChild(mainMask);
+  }
+
+  let sideviewMask = document.getElementById("ds-sideview-mask");
+  if (!sideviewMask) {
+    sideviewMask = document.createElement("div");
+    sideviewMask.id = "ds-sideview-mask";
+    panel.appendChild(sideviewMask);
   }
 
   // 拖拽手柄

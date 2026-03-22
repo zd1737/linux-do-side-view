@@ -332,3 +332,56 @@ html.ds-sideview-open #ds-sideview-panel {
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
 }
+
+/* 分栏遮罩样式 (Dim Mask) */
+#ds-main-mask {
+  position: fixed;
+  inset: 0;
+  width: calc(100vw - var(--ds-sideview-width));
+  background: rgba(0, 0, 0, var(--ds-mask-opacity, 0)); /* 浅色模式默认遮罩 */
+  z-index: 9998; /* 确保在 Discourse 内容之上，但在侧边栏之下 */
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--ds-mask-duration, 2s) ease, visibility var(--ds-mask-duration, 2s) ease, background-color var(--ds-mask-duration, 2s) ease;
+}
+
+#ds-sideview-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, var(--ds-mask-opacity, 0)); /* 浅色模式默认遮罩 */
+  z-index: 2; /* 在 iframe 之上，在工具栏和拖拽手柄之下 */
+  pointer-events: none;
+  opacity: 0; /* 默认隐藏 */
+  visibility: hidden;
+  transition: opacity var(--ds-mask-duration, 2s) ease, visibility var(--ds-mask-duration, 2s) ease, background-color var(--ds-mask-duration, 2s) ease;
+}
+
+/* 适配深色模式 */
+@media (prefers-color-scheme: dark) {
+  #ds-main-mask,
+  #ds-sideview-mask {
+    background: rgba(0, 0, 0, var(--ds-mask-opacity, 0));
+  }
+}
+
+/* 开启功能并且面板展开时，显示遮罩元素 */
+html.ds-dim-enabled.ds-sideview-open #ds-main-mask {
+  visibility: visible;
+  /* ds-main-mask 默认还是透明的，只有 hover 侧边栏才变深 */
+  opacity: 0;
+}
+html.ds-dim-enabled.ds-sideview-open #ds-sideview-mask {
+  visibility: visible;
+  opacity: 1; /* 默认右侧面板被虚化遮罩 */
+}
+
+/* 根据鼠标悬浮状态切换遮罩的透明度 */
+html.ds-dim-enabled.ds-sideview-open:has(#ds-sideview-panel:hover) #ds-main-mask {
+  opacity: 1; /* 鼠标在右侧面板时，遮罩左侧主面板 */
+}
+
+html.ds-dim-enabled.ds-sideview-open:has(#ds-sideview-panel:hover) #ds-sideview-mask {
+  opacity: 0; /* 鼠标在右侧面板时，取消右侧自身的遮罩 */
+  visibility: hidden;
+}
