@@ -52,15 +52,9 @@ jobs:
             echo "版本号已经是 $VERSION，无需提交更改。"
           fi
 
-      - name: 准备扩展文件
-        run: |
-          mkdir -p release-package
-          cp manifest.json content.js page-bridge.js styles.css release-package/
-
       - name: 创建 ZIP 压缩包
         run: |
-          cd release-package
-          zip -r "../${ZIP_NAME}" .
+          zip -r "${ZIP_NAME}" . -x "README.md" "readme.md" "assets/*" ".*" ".*/*"
 
       - name: 上传 ZIP 包为 Artifact
         uses: actions/upload-artifact@v4
@@ -72,8 +66,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # 获取上一个 tag，如果找不到则为空
-          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          # 确保获取的是真实的 previous tag，不受前面 commit 操作移动 HEAD 的影响
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 ${TAG_NAME}^ 2>/dev/null || echo "")
           
           # 生成更新日志 (changelog)
           if [ -z "$PREVIOUS_TAG" ]; then
