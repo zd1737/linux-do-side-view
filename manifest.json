@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Linux.do SideView",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "为 linux.do 提供左右分栏的主题阅读体验，在右侧内嵌面板快速预览帖子内容。",
   "permissions": [
     "storage"
@@ -12,16 +12,26 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://linux.do/*"],
-      "js": ["page-bridge.js"],
+      "matches": [
+        "https://linux.do/*"
+      ],
+      "js": [
+        "page-bridge.js"
+      ],
       "all_frames": true,
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": ["https://linux.do/*"],
-      "js": ["content.js"],
-      "css": ["styles.css"],
+      "matches": [
+        "https://linux.do/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
       "all_frames": true,
       "run_at": "document_start"
     }
