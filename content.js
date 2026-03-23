@@ -9,6 +9,7 @@ const RESIZE_HANDLE_ID = "ds-sideview-resize-handle";
 const OPEN_CLASS = "ds-sideview-open";
 const FRAME_CLASS = "ds-sideview-frame";
 const RESIZING_CLASS = "ds-sideview-resizing";
+const PANEL_ACTIVE_CLASS = "ds-sideview-panel-active";
 
 // 界面限制常量
 const MIN_SPLIT_WIDTH = 1100; // 启用分栏模式的最小窗口宽度
@@ -70,6 +71,39 @@ function initTopLevel() {
   initDimSetting();
   // 监听全局点击事件，必须在捕获阶段拦截
   document.addEventListener("click", handleDocumentClick, true);
+
+  // 监听全局鼠标移动，以坐标判断是否位于右侧面板（取代 hover 和 iframe 内交互，解决 iframe 跨域失去 hover 的问题）
+  document.addEventListener("mousemove", (event) => {
+    if (!document.documentElement.classList.contains(OPEN_CLASS)) return;
+    const panel = document.getElementById(PANEL_ID);
+    if (!panel) return;
+    
+    const panelRect = panel.getBoundingClientRect();
+    const isInside = event.clientX >= panelRect.left;
+    
+    document.documentElement.classList.toggle(PANEL_ACTIVE_CLASS, isInside);
+  }, { passive: true });
+
+  // 接收来自 iframe 内部的鼠标坐标信息
+  window.addEventListener("message", (event) => {
+    if (event.origin !== window.location.origin) return;
+    
+    if (event.data && event.data.type === "ds-iframe-interaction") {
+      if (!document.documentElement.classList.contains(OPEN_CLASS)) return;
+      const panel = document.getElementById(PANEL_ID);
+      if (!panel) return;
+
+      const panelRect = panel.getBoundingClientRect();
+      // iframe 内部发来的坐标是相对于 iframe 视口的
+      // iframe 的 left 坐标就是 panelRect.left
+      // 因此 iframe 内部的 X 坐标转化为全局 X 坐标为：event.data.x + panelRect.left
+      const globalX = event.data.x + panelRect.left;
+      const isInside = globalX >= panelRect.left;
+      
+      document.documentElement.classList.toggle(PANEL_ACTIVE_CLASS, isInside);
+    }
+  });
+
   // 监听按键（Esc关闭侧边栏）
   window.addEventListener("keydown", handleKeydown);
   // 监听窗口大小变化调整布局
@@ -361,6 +395,7 @@ function closeSideView() {
 
   endResize(false); // 取消可能的拖拽状态
   document.documentElement.classList.remove(OPEN_CLASS);
+  document.documentElement.classList.remove(PANEL_ACTIVE_CLASS);
   panel.setAttribute("aria-hidden", "true");
   iframeFirstLoaded = false; // 重置首次加载标记
 

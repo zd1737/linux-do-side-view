@@ -477,6 +477,21 @@ function initNavigationBridge() {
 
   window.__dsSideviewNavigationBridgeInstalled = true;
 
+  // 监听用户交互并通知父页面，用于控制遮罩状态
+  const notifyInteraction = (event) => {
+    // 传递光标的屏幕X坐标（相对于视口）
+    const x = event.clientX;
+    window.parent.postMessage({ type: "ds-iframe-interaction", x: x }, window.location.origin);
+  };
+  
+  window.addEventListener("mousemove", notifyInteraction, { passive: true });
+  // 也监听点击和按键等交互，如果有交互，默认鼠标在右侧
+  const notifyActive = () => {
+    window.parent.postMessage({ type: "ds-iframe-interaction", x: window.innerWidth / 2 }, window.location.origin);
+  };
+  window.addEventListener("click", notifyActive, { passive: true });
+  window.addEventListener("keydown", notifyActive, { passive: true });
+
   window.addEventListener("message", (event) => {
     // 只接受同源消息
     if (event.origin !== window.location.origin) {

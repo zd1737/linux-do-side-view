@@ -376,12 +376,14 @@ html.ds-dim-enabled.ds-sideview-open #ds-sideview-mask {
   opacity: 1; /* 默认右侧面板被虚化遮罩 */
 }
 
-/* 根据鼠标悬浮状态切换遮罩的透明度 */
+/* 右侧面板处于交互态时切换遮罩 */
+html.ds-dim-enabled.ds-sideview-open.ds-sideview-panel-active #ds-main-mask,
 html.ds-dim-enabled.ds-sideview-open:has(#ds-sideview-panel:hover) #ds-main-mask {
-  opacity: 1; /* 鼠标在右侧面板时，遮罩左侧主面板 */
+  opacity: 1; /* 鼠标或焦点在右侧面板时，遮罩左侧主面板 */
 }
 
+html.ds-dim-enabled.ds-sideview-open.ds-sideview-panel-active #ds-sideview-mask,
 html.ds-dim-enabled.ds-sideview-open:has(#ds-sideview-panel:hover) #ds-sideview-mask {
-  opacity: 0; /* 鼠标在右侧面板时，取消右侧自身的遮罩 */
+  opacity: 0; /* 鼠标或焦点在右侧面板时，取消右侧自身的遮罩 */
   visibility: hidden;
 }
