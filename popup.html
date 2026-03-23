@@ -111,6 +111,36 @@
       padding: 4px 0;
     }
 
+    .mode-options {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .mode-option {
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      background: var(--surface-color);
+      color: var(--text-muted);
+      padding: 10px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .mode-option:hover {
+      border-color: color-mix(in srgb, var(--border-color) 45%, var(--primary-color));
+      color: var(--text-main);
+    }
+
+    .mode-option.is-active {
+      background: color-mix(in srgb, var(--surface-color) 55%, var(--primary-color));
+      border-color: var(--primary-color);
+      color: var(--primary-hover);
+      box-shadow: var(--shadow-sm);
+    }
+
     .slider-input {
       -webkit-appearance: none;
       width: 100%;
@@ -184,21 +214,31 @@
     <div class="setting-group">
       <div class="setting-item">
         <div class="setting-header">
-          <span class="setting-label">背景虚化遮罩</span>
+          <span class="setting-label">弱化方案</span>
+        </div>
+        <div class="mode-options" role="group" aria-label="弱化方案">
+          <button type="button" class="mode-option is-active" data-dim-mode="text">文字融入</button>
+          <button type="button" class="mode-option" data-dim-mode="mask">遮罩</button>
+        </div>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-header">
+          <span class="setting-label">弱化强度</span>
           <span class="setting-value" id="dim-percent-display">0%</span>
         </div>
         <div class="slider-container">
-          <input type="range" id="dim-slider" min="0" max="100" value="0" class="slider-input" title="调节遮罩深浅">
+          <input type="range" id="dim-slider" min="0" max="100" value="0" class="slider-input" title="调节弱化强度">
         </div>
       </div>
       
       <div class="setting-item">
         <div class="setting-header">
-          <span class="setting-label">遮罩过渡时间</span>
+          <span class="setting-label">过渡时间</span>
           <span class="setting-value" id="dim-duration-display">2.0s</span>
         </div>
         <div class="slider-container">
-          <input type="range" id="dim-duration-slider" min="0" max="50" value="20" class="slider-input" title="调节遮罩动画速度">
+          <input type="range" id="dim-duration-slider" min="0" max="50" value="20" class="slider-input" title="调节虚化动画速度">
         </div>
       </div>
     </div>

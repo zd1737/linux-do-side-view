@@ -10,6 +10,9 @@ const OPEN_CLASS = "ds-sideview-open";
 const FRAME_CLASS = "ds-sideview-frame";
 const RESIZING_CLASS = "ds-sideview-resizing";
 const PANEL_ACTIVE_CLASS = "ds-sideview-panel-active";
+const DIM_MODE_KEY = "ds-sideview-dim-mode";
+const DIM_MODE_MASK = "mask";
+const DIM_MODE_TEXT = "text";
 
 // 界面限制常量
 const MIN_SPLIT_WIDTH = 1100; // 启用分栏模式的最小窗口宽度
@@ -46,8 +49,9 @@ let activeResize = null; // 当前拖拽调整宽度的状态
 let iframeFirstLoaded = false; // iframe 是否已完成首次加载
 let activeTopicStyleElement = null; // 用于高亮当前阅读话题的 style 元素
 
-let dimOpacity = null; // 当前应用的遮罩透明度百分比
-let dimDuration = null; // 当前应用的遮罩过渡时间
+let dimOpacity = null; // 当前应用的弱化强度百分比
+let dimDuration = null; // 当前应用的弱化过渡时间
+let dimMode = DIM_MODE_TEXT; // 当前视觉方案：遮罩或文字融入
 const DIM_OPACITY_KEY = "ds-sideview-dim-opacity";
 const DIM_DURATION_KEY = "ds-sideview-dim-duration";
 
@@ -81,7 +85,7 @@ function initTopLevel() {
     const panelRect = panel.getBoundingClientRect();
     const isInside = event.clientX >= panelRect.left;
     
-    document.documentElement.classList.toggle(PANEL_ACTIVE_CLASS, isInside);
+    setPanelActiveState(isInside);
   }, { passive: true });
 
   // 接收来自 iframe 内部的鼠标坐标信息
@@ -100,7 +104,7 @@ function initTopLevel() {
       const globalX = event.data.x + panelRect.left;
       const isInside = globalX >= panelRect.left;
       
-      document.documentElement.classList.toggle(PANEL_ACTIVE_CLASS, isInside);
+      setPanelActiveState(isInside);
     }
   });
 
@@ -113,19 +117,26 @@ function initTopLevel() {
 }
 
 /**
- * 初始化遮罩设置（透明度和动画时间）
+ * 初始化视觉弱化设置（方案、强度和过渡时间）
  */
 function initDimSetting() {
   if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-    chrome.storage.local.get([DIM_OPACITY_KEY, DIM_DURATION_KEY], (result) => {
-      // 获取保存的透明度
+    chrome.storage.local.get([DIM_OPACITY_KEY, DIM_DURATION_KEY, DIM_MODE_KEY], (result) => {
+      // 获取保存的弱化强度
       if (result[DIM_OPACITY_KEY] !== undefined) {
         dimOpacity = result[DIM_OPACITY_KEY];
+      } else {
+        dimOpacity = getDefaultDimOpacity();
       }
       
       // 获取保存的过渡时间
       if (result[DIM_DURATION_KEY] !== undefined) {
         dimDuration = result[DIM_DURATION_KEY];
+      }
+
+      // 获取保存的视觉方案
+      if (result[DIM_MODE_KEY] !== undefined) {
+        dimMode = normalizeDimMode(result[DIM_MODE_KEY]);
       }
       
       applyDimClass();
@@ -141,6 +152,11 @@ function initDimSetting() {
       
       if (area === 'local' && changes[DIM_DURATION_KEY]) {
         dimDuration = changes[DIM_DURATION_KEY].newValue;
+        changed = true;
+      }
+
+      if (area === "local" && changes[DIM_MODE_KEY]) {
+        dimMode = normalizeDimMode(changes[DIM_MODE_KEY].newValue);
         changed = true;
       }
       
@@ -163,35 +179,40 @@ function initDimSetting() {
 }
 
 /**
- * 应用当前的遮罩透明度和过渡时间到页面 CSS 变量及类名上
+ * 应用当前视觉方案、弱化强度和过渡时间到页面 CSS 变量及类名上
  */
 function applyDimClass() {
+  const resolvedOpacity = Number.isFinite(dimOpacity) ? dimOpacity : getDefaultDimOpacity();
+  const resolvedMode = normalizeDimMode(dimMode);
+
+  document.documentElement.dataset.dsDimMode = resolvedMode;
+
   if (dimDuration !== null) {
     document.documentElement.style.setProperty('--ds-mask-duration', (dimDuration / 10).toFixed(1) + 's');
   } else {
     document.documentElement.style.removeProperty('--ds-mask-duration');
   }
 
-  if (dimOpacity !== null) {
-    // 将百分比(0-100)转换为小数(0-1)赋予 CSS 变量
-    document.documentElement.style.setProperty('--ds-mask-opacity', (dimOpacity / 100).toString());
-    if (dimOpacity === 0) {
-      document.documentElement.classList.remove("ds-dim-enabled");
-    } else {
-      document.documentElement.classList.add("ds-dim-enabled");
-    }
+  document.documentElement.style.setProperty('--ds-mask-opacity', (resolvedOpacity / 100).toString());
+  document.documentElement.style.setProperty('--ds-text-blend-strength', (resolvedOpacity / 100).toFixed(3));
+
+  if (resolvedOpacity === 0) {
+    document.documentElement.classList.remove("ds-dim-enabled");
   } else {
-    document.documentElement.style.removeProperty('--ds-mask-opacity');
     document.documentElement.classList.add("ds-dim-enabled");
   }
+
+  syncSideViewFrameVisualState();
 }
 
 /**
  * iframe 内页面初始化
- * 主要是隐藏多余的 UI 和处理布局
+ * 负责同步视觉设置、监听主页面状态，并处理 iframe 内布局
  */
 function initFrameMode() {
+  initDimSetting();
   document.documentElement.classList.add(FRAME_CLASS);
+  window.addEventListener("message", handleFrameVisualStateMessage);
 
   const scheduleLayout = createRafScheduler(syncIframeLayout);
   scheduleFrameLayout = scheduleLayout;
@@ -333,6 +354,7 @@ function openSideView(url) {
   applySideViewWidth(preferredSideViewWidth);
   document.documentElement.classList.add(OPEN_CLASS);
   elements.panel.setAttribute("aria-hidden", "false");
+  syncSideViewFrameVisualState();
 
   // 如果是从关闭状态打开的，将外部滚动条切换到主内容区域
   if (!wasOpen) {
@@ -395,7 +417,7 @@ function closeSideView() {
 
   endResize(false); // 取消可能的拖拽状态
   document.documentElement.classList.remove(OPEN_CLASS);
-  document.documentElement.classList.remove(PANEL_ACTIVE_CLASS);
+  setPanelActiveState(false);
   panel.setAttribute("aria-hidden", "true");
   iframeFirstLoaded = false; // 重置首次加载标记
 
@@ -512,6 +534,11 @@ function ensurePanel() {
     iframe.loading = "eager";
     iframe.referrerPolicy = "strict-origin-when-cross-origin";
     panel.appendChild(iframe);
+  }
+
+  if (!iframe.dataset.dsVisualSyncBound) {
+    iframe.addEventListener("load", syncSideViewFrameVisualState);
+    iframe.dataset.dsVisualSyncBound = "true";
   }
 
   if (!panel.isConnected) {
@@ -762,6 +789,90 @@ function saveSideViewWidth(width) {
   } catch {
     // 忽略存储失败（例如无痕模式限制等），仅保留内存中的偏好。
   }
+}
+
+/**
+ * 获取默认的弱化强度
+ */
+function getDefaultDimOpacity() {
+  return 0;
+}
+
+/**
+ * 规范化视觉方案，确保只返回支持的模式值
+ */
+function normalizeDimMode(mode) {
+  return mode === DIM_MODE_TEXT ? DIM_MODE_TEXT : DIM_MODE_MASK;
+}
+
+/**
+ * 更新右侧面板是否处于交互态，并同步给 iframe
+ */
+function setPanelActiveState(isActive) {
+  const shouldBeActive = Boolean(isActive);
+  const isCurrentlyActive = document.documentElement.classList.contains(PANEL_ACTIVE_CLASS);
+
+  if (isCurrentlyActive === shouldBeActive) {
+    return;
+  }
+
+  document.documentElement.classList.toggle(PANEL_ACTIVE_CLASS, shouldBeActive);
+  syncSideViewFrameVisualState();
+}
+
+/**
+ * 将当前视觉方案和面板激活状态同步到侧边 iframe
+ */
+function syncSideViewFrameVisualState() {
+  if (window.top !== window) {
+    return;
+  }
+
+  const iframe = document.getElementById(IFRAME_ID);
+  const iframeWindow = iframe?.contentWindow;
+  if (!iframeWindow) {
+    return;
+  }
+
+  iframeWindow.postMessage({
+    type: "ds-sideview-visual-state",
+    opacity: Number.isFinite(dimOpacity) ? dimOpacity : getDefaultDimOpacity(),
+    duration: dimDuration,
+    mode: normalizeDimMode(dimMode),
+    panelActive: document.documentElement.classList.contains(PANEL_ACTIVE_CLASS)
+  }, window.location.origin);
+}
+
+/**
+ * 接收主页面发来的视觉状态消息，并更新 iframe 内的样式状态
+ */
+function handleFrameVisualStateMessage(event) {
+  if (window.top === window || event.origin !== window.location.origin) {
+    return;
+  }
+
+  const data = event.data;
+  if (!data || data.type !== "ds-sideview-visual-state") {
+    return;
+  }
+
+  if (data.opacity !== undefined) {
+    dimOpacity = data.opacity;
+  }
+
+  if (data.duration !== undefined) {
+    dimDuration = data.duration;
+  }
+
+  if (data.mode !== undefined) {
+    dimMode = normalizeDimMode(data.mode);
+  }
+
+  if (typeof data.panelActive === "boolean") {
+    document.documentElement.classList.toggle(PANEL_ACTIVE_CLASS, data.panelActive);
+  }
+
+  applyDimClass();
 }
 
 /**

@@ -5,6 +5,9 @@
   --ds-sideview-shadow: -10px 0 30px rgba(0, 0, 0, 0.05); /* 左侧阴影，增加层次感 */
   --ds-sideview-resize-handle-width: 16px; /* 调整宽度的拖拽手柄可点击区域宽度 */
   --ds-sideview-resize-line-width: 4px; /* 拖拽手柄的可见线条宽度 */
+  --ds-text-blend-strength: 0;
+  --ds-main-topic-text-opacity: 1;
+  --ds-frame-topic-text-opacity: 1;
 }
 
 /* 自定义滚动条样式，使其更优雅统一 */
@@ -366,24 +369,60 @@ html.ds-sideview-open #ds-sideview-panel {
 }
 
 /* 开启功能并且面板展开时，显示遮罩元素 */
-html.ds-dim-enabled.ds-sideview-open #ds-main-mask {
+html.ds-dim-enabled.ds-sideview-open[data-ds-dim-mode="mask"] #ds-main-mask {
   visibility: visible;
   /* ds-main-mask 默认还是透明的，只有 hover 侧边栏才变深 */
   opacity: 0;
 }
-html.ds-dim-enabled.ds-sideview-open #ds-sideview-mask {
+html.ds-dim-enabled.ds-sideview-open[data-ds-dim-mode="mask"] #ds-sideview-mask {
   visibility: visible;
   opacity: 1; /* 默认右侧面板被虚化遮罩 */
 }
 
 /* 右侧面板处于交互态时切换遮罩 */
-html.ds-dim-enabled.ds-sideview-open.ds-sideview-panel-active #ds-main-mask,
-html.ds-dim-enabled.ds-sideview-open:has(#ds-sideview-panel:hover) #ds-main-mask {
+html.ds-dim-enabled.ds-sideview-open[data-ds-dim-mode="mask"].ds-sideview-panel-active #ds-main-mask,
+html.ds-dim-enabled.ds-sideview-open[data-ds-dim-mode="mask"]:has(#ds-sideview-panel:hover) #ds-main-mask {
   opacity: 1; /* 鼠标或焦点在右侧面板时，遮罩左侧主面板 */
 }
 
-html.ds-dim-enabled.ds-sideview-open.ds-sideview-panel-active #ds-sideview-mask,
-html.ds-dim-enabled.ds-sideview-open:has(#ds-sideview-panel:hover) #ds-sideview-mask {
+html.ds-dim-enabled.ds-sideview-open[data-ds-dim-mode="mask"].ds-sideview-panel-active #ds-sideview-mask,
+html.ds-dim-enabled.ds-sideview-open[data-ds-dim-mode="mask"]:has(#ds-sideview-panel:hover) #ds-sideview-mask {
   opacity: 0; /* 鼠标或焦点在右侧面板时，取消右侧自身的遮罩 */
   visibility: hidden;
+}
+
+/* 文字融入模式：主页面在右侧面板激活时弱化话题列表和图片 */
+html[data-ds-dim-mode="text"] #list-area .topic-list :is(
+  .main-link,
+  .link-top-line,
+  .link-bottom-line,
+  .topic-excerpt,
+  .badge-category,
+  .discourse-tags,
+  .num,
+  .age,
+  .views,
+  img
+) {
+  opacity: var(--ds-main-topic-text-opacity, 1);
+  transition: opacity var(--ds-mask-duration, 2s) ease;
+}
+
+html.ds-dim-enabled.ds-sideview-open[data-ds-dim-mode="text"].ds-sideview-panel-active {
+  --ds-main-topic-text-opacity: calc(1 - (var(--ds-text-blend-strength, 0) * 0.82));
+}
+
+/* 文字融入模式：iframe 在未激活时弱化话题详情内容 */
+html.ds-sideview-frame[data-ds-dim-mode="text"] :is(
+  #topic-title,
+  .topic-post article,
+  .small-action .small-action-desc,
+  .topic-post .topic-map
+) {
+  opacity: var(--ds-frame-topic-text-opacity, 1);
+  transition: opacity var(--ds-mask-duration, 2s) ease;
+}
+
+html.ds-dim-enabled.ds-sideview-frame[data-ds-dim-mode="text"]:not(.ds-sideview-panel-active) {
+  --ds-frame-topic-text-opacity: calc(1 - (var(--ds-text-blend-strength, 0) * 0.82));
 }
