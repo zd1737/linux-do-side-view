@@ -182,6 +182,55 @@ html.ds-sideview-open #ds-sideview-panel {
   transform: translateX(0);
 }
 
+/* welcome banner 标题默认只显示左侧折叠箭头，展开后文字显示在右侧 */
+.welcome-banner__title.ds-welcome-banner-title-collapsible {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  grid-template-areas: "toggle content";
+  align-items: center;
+  column-gap: 10px;
+  cursor: pointer;
+}
+
+.welcome-banner__title.ds-welcome-banner-title-collapsible .ds-welcome-banner-title-toggle {
+  grid-area: toggle;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary-medium, #6b7280);
+  cursor: pointer;
+  appearance: none;
+}
+
+.welcome-banner__title.ds-welcome-banner-title-collapsible .ds-welcome-banner-title-toggle::before {
+  content: "";
+  display: block;
+  width: 0;
+  height: 0;
+  margin: 4px auto 0;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-left: 8px solid currentColor;
+  transform-origin: 40% 50%;
+  transition: transform 0.18s ease;
+}
+
+.welcome-banner__title.ds-welcome-banner-title-collapsible[data-ds-welcome-banner-collapsed="false"] .ds-welcome-banner-title-toggle::before {
+  transform: rotate(90deg);
+}
+
+.welcome-banner__title.ds-welcome-banner-title-collapsible .ds-welcome-banner-title-content {
+  grid-area: content;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.welcome-banner__title.ds-welcome-banner-title-collapsible .ds-welcome-banner-title-content[hidden] {
+  display: none !important;
+}
+
 /* 底部工具栏（包含关闭按钮等） */
 #ds-sideview-toolbar {
   position: absolute;

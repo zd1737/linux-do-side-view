@@ -10,6 +10,12 @@ const OPEN_CLASS = "ds-sideview-open";
 const FRAME_CLASS = "ds-sideview-frame";
 const RESIZING_CLASS = "ds-sideview-resizing";
 const PANEL_ACTIVE_CLASS = "ds-sideview-panel-active";
+const WELCOME_BANNER_TITLE_SELECTOR = ".welcome-banner__title";
+const WELCOME_BANNER_TITLE_COLLAPSIBLE_CLASS = "ds-welcome-banner-title-collapsible";
+const WELCOME_BANNER_TITLE_TOGGLE_CLASS = "ds-welcome-banner-title-toggle";
+const WELCOME_BANNER_TITLE_CONTENT_CLASS = "ds-welcome-banner-title-content";
+const WELCOME_BANNER_TITLE_COLLAPSED_ATTR = "data-ds-welcome-banner-collapsed";
+const WELCOME_BANNER_TITLE_READY_ATTR = "data-ds-welcome-banner-ready";
 const DIM_MODE_KEY = "ds-sideview-dim-mode";
 const DIM_MODE_MASK = "mask";
 const DIM_MODE_TEXT = "text";
@@ -73,6 +79,7 @@ if (window.location.hostname === HOSTNAME) {
 function initTopLevel() {
   initStoredSideViewWidth();
   initDimSetting();
+  initWelcomeBannerCollapse();
   // 监听全局点击事件，必须在捕获阶段拦截
   document.addEventListener("click", handleDocumentClick, true);
 
@@ -211,6 +218,7 @@ function applyDimClass() {
  */
 function initFrameMode() {
   initDimSetting();
+  initWelcomeBannerCollapse();
   document.documentElement.classList.add(FRAME_CLASS);
   window.addEventListener("message", handleFrameVisualStateMessage);
 
@@ -229,6 +237,121 @@ function initFrameMode() {
   const checkIntervals = [100, 300, 600, 1000, 2000, 3000];
   for (const ms of checkIntervals) {
     window.setTimeout(scheduleLayout, ms);
+  }
+}
+
+/**
+ * 初始化首页 welcome banner 标题的默认收缩/展开能力
+ */
+function initWelcomeBannerCollapse() {
+  if (window.__dsWelcomeBannerCollapseInstalled) {
+    return;
+  }
+
+  window.__dsWelcomeBannerCollapseInstalled = true;
+
+  const scheduleSync = createRafScheduler(syncWelcomeBannerTitles);
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", scheduleSync, { once: true });
+  } else {
+    scheduleSync();
+  }
+
+  window.addEventListener("load", scheduleSync);
+  document.addEventListener("click", handleWelcomeBannerTitleClick, true);
+
+  const observer = new MutationObserver(() => {
+    scheduleSync();
+  });
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true
+  });
+}
+
+/**
+ * 扫描页面中的 welcome banner 标题并补齐默认收缩态
+ */
+function syncWelcomeBannerTitles() {
+  document.querySelectorAll(WELCOME_BANNER_TITLE_SELECTOR).forEach(prepareWelcomeBannerTitle);
+}
+
+/**
+ * 为 welcome banner 标题设置可折叠交互
+ */
+function prepareWelcomeBannerTitle(title) {
+  if (!(title instanceof HTMLElement) || title.hasAttribute(WELCOME_BANNER_TITLE_READY_ATTR)) {
+    return;
+  }
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = WELCOME_BANNER_TITLE_TOGGLE_CLASS;
+
+  const content = document.createElement("div");
+  content.className = WELCOME_BANNER_TITLE_CONTENT_CLASS;
+
+  while (title.firstChild) {
+    content.appendChild(title.firstChild);
+  }
+
+  title.setAttribute(WELCOME_BANNER_TITLE_READY_ATTR, "true");
+  title.classList.add(WELCOME_BANNER_TITLE_COLLAPSIBLE_CLASS);
+  title.append(toggle, content);
+  setWelcomeBannerTitleCollapsed(title, true);
+}
+
+/**
+ * 处理 welcome banner 标题区域点击，切换收缩状态
+ */
+function handleWelcomeBannerTitleClick(event) {
+  const title = event.target instanceof Element
+    ? event.target.closest(WELCOME_BANNER_TITLE_SELECTOR)
+    : null;
+
+  if (!title || !title.hasAttribute(WELCOME_BANNER_TITLE_READY_ATTR)) {
+    return;
+  }
+
+  if (event.target instanceof Element && event.target.closest("a, input, textarea, select")) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  if (typeof event.stopImmediatePropagation === "function") {
+    event.stopImmediatePropagation();
+  }
+
+  toggleWelcomeBannerTitle(title);
+}
+
+/**
+ * 切换 welcome banner 标题展开状态
+ */
+function toggleWelcomeBannerTitle(title) {
+  const isCollapsed = title.getAttribute(WELCOME_BANNER_TITLE_COLLAPSED_ATTR) !== "false";
+  setWelcomeBannerTitleCollapsed(title, !isCollapsed);
+}
+
+/**
+ * 更新 welcome banner 标题的收缩态属性和辅助文本
+ */
+function setWelcomeBannerTitleCollapsed(title, collapsed) {
+  const toggle = title.querySelector(`.${WELCOME_BANNER_TITLE_TOGGLE_CLASS}`);
+  const content = title.querySelector(`.${WELCOME_BANNER_TITLE_CONTENT_CLASS}`);
+
+  title.setAttribute(WELCOME_BANNER_TITLE_COLLAPSED_ATTR, collapsed ? "true" : "false");
+
+  if (content instanceof HTMLElement) {
+    content.hidden = collapsed;
+  }
+
+  if (toggle instanceof HTMLButtonElement) {
+    toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    toggle.setAttribute("aria-label", collapsed ? "展开欢迎横幅标题" : "收起欢迎横幅标题");
+    toggle.title = collapsed ? "展开" : "收起";
   }
 }
 
