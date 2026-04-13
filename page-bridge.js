@@ -769,7 +769,7 @@ function isSupportedSideViewPath(path) {
 }
 
 /**
- * 判定该路径是否是树形主题页
+ * 判定该路径是否是树形话题页
  */
 function isNestedTopicPath(path) {
   return typeof path === "string" && path.startsWith("/nested/topic/");
@@ -810,7 +810,7 @@ function resetIframeScrollPosition() {
 }
 
 /**
- * SPA 导航后补几次滚动重置，兼容树形主题页延迟渲染导致的滚动残留
+ * SPA 导航后补几次滚动重置，兼容树形话题页延迟渲染导致的滚动残留
  */
 function scheduleIframeScrollReset() {
   resetIframeScrollPosition();
