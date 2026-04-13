@@ -16,6 +16,13 @@ const WELCOME_BANNER_TITLE_TOGGLE_CLASS = "ds-welcome-banner-title-toggle";
 const WELCOME_BANNER_TITLE_CONTENT_CLASS = "ds-welcome-banner-title-content";
 const WELCOME_BANNER_TITLE_COLLAPSED_ATTR = "data-ds-welcome-banner-collapsed";
 const WELCOME_BANNER_TITLE_READY_ATTR = "data-ds-welcome-banner-ready";
+const TOPIC_OPEN_MODE_KEY = "ds-sideview-topic-open-mode";
+const TOPIC_OPEN_MODE_NORMAL = "normal";
+const TOPIC_OPEN_MODE_TREE = "tree";
+const TOPIC_TREE_SORT_KEY = "ds-sideview-topic-tree-sort";
+const TOPIC_TREE_SORT_TOP = "top";
+const TOPIC_TREE_SORT_NEW = "new";
+const TOPIC_TREE_SORT_OLD = "old";
 const DIM_MODE_KEY = "ds-sideview-dim-mode";
 const DIM_MODE_MASK = "mask";
 const DIM_MODE_TEXT = "text";
@@ -58,6 +65,8 @@ let activeTopicStyleElement = null; // 用于高亮当前阅读话题的 style �
 let dimOpacity = null; // 当前应用的弱化强度百分比
 let dimDuration = null; // 当前应用的弱化过渡时间
 let dimMode = DIM_MODE_TEXT; // 当前视觉方案：遮罩或文字融入
+let topicOpenMode = TOPIC_OPEN_MODE_NORMAL; // 当前主题打开模式：普通或树形
+let topicTreeSort = TOPIC_TREE_SORT_OLD; // 当前树形模式默认排序
 const DIM_OPACITY_KEY = "ds-sideview-dim-opacity";
 const DIM_DURATION_KEY = "ds-sideview-dim-duration";
 
@@ -79,6 +88,7 @@ if (window.location.hostname === HOSTNAME) {
 function initTopLevel() {
   initStoredSideViewWidth();
   initDimSetting();
+  initTopicOpenSetting();
   initWelcomeBannerCollapse();
   // 监听全局点击事件，必须在捕获阶段拦截
   document.addEventListener("click", handleDocumentClick, true);
@@ -182,6 +192,35 @@ function initDimSetting() {
     });
   } else {
     applyDimClass();
+  }
+}
+
+/**
+ * 初始化主题打开模式与树形排序设置
+ */
+function initTopicOpenSetting() {
+  if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+    chrome.storage.local.get([TOPIC_OPEN_MODE_KEY, TOPIC_TREE_SORT_KEY], (result) => {
+      topicOpenMode = normalizeTopicOpenMode(result[TOPIC_OPEN_MODE_KEY]);
+      topicTreeSort = normalizeTopicTreeSort(result[TOPIC_TREE_SORT_KEY]);
+    });
+
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local") {
+        return;
+      }
+
+      if (changes[TOPIC_OPEN_MODE_KEY]) {
+        topicOpenMode = normalizeTopicOpenMode(changes[TOPIC_OPEN_MODE_KEY].newValue);
+      }
+
+      if (changes[TOPIC_TREE_SORT_KEY]) {
+        topicTreeSort = normalizeTopicTreeSort(changes[TOPIC_TREE_SORT_KEY].newValue);
+      }
+    });
+  } else {
+    topicOpenMode = TOPIC_OPEN_MODE_NORMAL;
+    topicTreeSort = TOPIC_TREE_SORT_OLD;
   }
 }
 
@@ -456,12 +495,12 @@ function getTopicUrl(rawHref) {
     return null;
   }
 
-  // 路径必须以 /t/ 开头（Discourse 的帖子链接特征）
-  if (!url.pathname.startsWith("/t/")) {
+  const topicId = extractTopicIdFromUrl(url);
+  if (!topicId) {
     return null;
   }
 
-  return url.toString();
+  return buildTopicOpenUrl(url, topicId);
 }
 
 /**
@@ -514,7 +553,7 @@ function navigateIframeViaClick(iframe, url) {
 
     // 从 URL 中提取路径
     const urlObj = new URL(url);
-    const pathname = urlObj.pathname + urlObj.hash; // e.g. /t/topic/1789018/132
+    const pathname = urlObj.pathname + urlObj.search + urlObj.hash;
 
     iframeWin.postMessage({
       type: "ds-sideview-navigate",
@@ -554,10 +593,8 @@ function closeSideView() {
  * 高亮当前正在阅读的话题
  */
 function highlightActiveTopic(topicUrl) {
-  // 提取 URL 中的 topic ID，例如 /t/topic-slug/12345 或 /t/12345
-  const match = topicUrl.match(/\/t\/(?:[^/]+\/)?(\d+)/);
-  if (!match) return;
-  const topicId = match[1];
+  const topicId = getTopicIdFromRawUrl(topicUrl);
+  if (!topicId) return;
 
   if (!activeTopicStyleElement) {
     activeTopicStyleElement = document.createElement("style");
@@ -571,6 +608,73 @@ function highlightActiveTopic(topicUrl) {
       background-color: var(--tertiary-low, rgba(0, 136, 204, 0.1)) !important;
     }
   `;
+}
+
+/**
+ * 将设置值规范化为支持的主题打开模式
+ */
+function normalizeTopicOpenMode(mode) {
+  return mode === TOPIC_OPEN_MODE_TREE ? TOPIC_OPEN_MODE_TREE : TOPIC_OPEN_MODE_NORMAL;
+}
+
+/**
+ * 将设置值规范化为支持的树形排序
+ */
+function normalizeTopicTreeSort(sort) {
+  if (sort === TOPIC_TREE_SORT_TOP || sort === TOPIC_TREE_SORT_NEW || sort === TOPIC_TREE_SORT_OLD) {
+    return sort;
+  }
+
+  return TOPIC_TREE_SORT_OLD;
+}
+
+/**
+ * 从论坛 URL 中提取 topic ID，兼容普通页与树形页
+ */
+function extractTopicIdFromUrl(url) {
+  if (!(url instanceof URL) || url.origin !== window.location.origin) {
+    return null;
+  }
+
+  let match = url.pathname.match(/^\/t\/(?:[^/]+\/)?(\d+)(?:\/|$)/);
+  if (match) {
+    return match[1];
+  }
+
+  match = url.pathname.match(/^\/nested\/topic\/(\d+)(?:\/|$)/);
+  if (match) {
+    return match[1];
+  }
+
+  return null;
+}
+
+/**
+ * 根据当前设置构造最终在 iframe 中打开的主题地址
+ */
+function buildTopicOpenUrl(sourceUrl, topicId) {
+  if (topicOpenMode === TOPIC_OPEN_MODE_TREE) {
+    const treeUrl = new URL(`/nested/topic/${topicId}`, window.location.origin);
+    treeUrl.searchParams.set("sort", topicTreeSort);
+    return treeUrl.toString();
+  }
+
+  if (sourceUrl.pathname.startsWith("/nested/topic/")) {
+    return new URL(`/t/${topicId}`, window.location.origin).toString();
+  }
+
+  return sourceUrl.toString();
+}
+
+/**
+ * 从原始 URL 字符串中提取 topic ID
+ */
+function getTopicIdFromRawUrl(rawUrl) {
+  try {
+    return extractTopicIdFromUrl(new URL(rawUrl, window.location.origin));
+  } catch {
+    return null;
+  }
 }
 
 /**

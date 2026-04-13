@@ -81,6 +81,10 @@
       gap: 10px;
     }
 
+    .setting-item[hidden] {
+      display: none !important;
+    }
+
     .setting-header {
       display: flex;
       align-items: center;
@@ -115,6 +119,10 @@
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
+    }
+
+    .mode-options[data-columns="3"] {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
     .mode-option {
@@ -212,6 +220,27 @@
 
   <div class="content">
     <div class="setting-group">
+      <div class="setting-item">
+        <div class="setting-header">
+          <span class="setting-label">主题打开模式</span>
+        </div>
+        <div class="mode-options" role="group" aria-label="主题打开模式">
+          <button type="button" class="mode-option is-active" data-topic-open-mode="normal">普通</button>
+          <button type="button" class="mode-option" data-topic-open-mode="tree">树形</button>
+        </div>
+      </div>
+
+      <div class="setting-item" id="topic-tree-sort-setting" hidden>
+        <div class="setting-header">
+          <span class="setting-label">树形默认排序</span>
+        </div>
+        <div class="mode-options" data-columns="3" role="group" aria-label="树形默认排序">
+          <button type="button" class="mode-option" data-topic-tree-sort="top">top</button>
+          <button type="button" class="mode-option" data-topic-tree-sort="new">new</button>
+          <button type="button" class="mode-option is-active" data-topic-tree-sort="old">old</button>
+        </div>
+      </div>
+
       <div class="setting-item">
         <div class="setting-header">
           <span class="setting-label">弱化方案</span>

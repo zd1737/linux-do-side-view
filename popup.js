@@ -3,17 +3,32 @@ const DIM_DURATION_KEY = "ds-sideview-dim-duration";
 const DIM_MODE_KEY = "ds-sideview-dim-mode";
 const DIM_MODE_MASK = "mask";
 const DIM_MODE_TEXT = "text";
+const TOPIC_OPEN_MODE_KEY = "ds-sideview-topic-open-mode";
+const TOPIC_OPEN_MODE_NORMAL = "normal";
+const TOPIC_OPEN_MODE_TREE = "tree";
+const TOPIC_TREE_SORT_KEY = "ds-sideview-topic-tree-sort";
+const TOPIC_TREE_SORT_TOP = "top";
+const TOPIC_TREE_SORT_NEW = "new";
+const TOPIC_TREE_SORT_OLD = "old";
 
 document.addEventListener("DOMContentLoaded", () => {
   const slider = document.getElementById("dim-slider");
   const display = document.getElementById("dim-percent-display");
-  
+  const topicTreeSortSetting = document.getElementById("topic-tree-sort-setting");
   const durationSlider = document.getElementById("dim-duration-slider");
   const durationDisplay = document.getElementById("dim-duration-display");
   const modeOptions = document.querySelectorAll("[data-dim-mode]");
+  const topicModeOptions = document.querySelectorAll("[data-topic-open-mode]");
+  const topicSortOptions = document.querySelectorAll("[data-topic-tree-sort]");
 
   // 加载当前保存的设置状态
-  chrome.storage.local.get([DIM_OPACITY_KEY, DIM_DURATION_KEY, DIM_MODE_KEY], (result) => {
+  chrome.storage.local.get([
+    DIM_OPACITY_KEY,
+    DIM_DURATION_KEY,
+    DIM_MODE_KEY,
+    TOPIC_OPEN_MODE_KEY,
+    TOPIC_TREE_SORT_KEY
+  ], (result) => {
     let opacity = 0; // 默认透明度 0%
     if (result[DIM_OPACITY_KEY] !== undefined) {
       opacity = result[DIM_OPACITY_KEY];
@@ -30,6 +45,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const mode = result[DIM_MODE_KEY] === DIM_MODE_MASK ? DIM_MODE_MASK : DIM_MODE_TEXT;
     updateModeOptions(modeOptions, mode);
+
+    const topicMode = result[TOPIC_OPEN_MODE_KEY] === TOPIC_OPEN_MODE_TREE
+      ? TOPIC_OPEN_MODE_TREE
+      : TOPIC_OPEN_MODE_NORMAL;
+    updateModeOptions(topicModeOptions, topicMode);
+    updateTopicTreeSortVisibility(topicTreeSortSetting, topicMode);
+
+    const topicSort = normalizeTopicTreeSort(result[TOPIC_TREE_SORT_KEY]);
+    updateModeOptions(topicSortOptions, topicSort);
   });
 
   modeOptions.forEach((option) => {
@@ -37,6 +61,25 @@ document.addEventListener("DOMContentLoaded", () => {
       const mode = option.dataset.dimMode === DIM_MODE_TEXT ? DIM_MODE_TEXT : DIM_MODE_MASK;
       updateModeOptions(modeOptions, mode);
       chrome.storage.local.set({ [DIM_MODE_KEY]: mode });
+    });
+  });
+
+  topicModeOptions.forEach((option) => {
+    option.addEventListener("click", () => {
+      const mode = option.dataset.topicOpenMode === TOPIC_OPEN_MODE_TREE
+        ? TOPIC_OPEN_MODE_TREE
+        : TOPIC_OPEN_MODE_NORMAL;
+      updateModeOptions(topicModeOptions, mode);
+      updateTopicTreeSortVisibility(topicTreeSortSetting, mode);
+      chrome.storage.local.set({ [TOPIC_OPEN_MODE_KEY]: mode });
+    });
+  });
+
+  topicSortOptions.forEach((option) => {
+    option.addEventListener("click", () => {
+      const sort = normalizeTopicTreeSort(option.dataset.topicTreeSort);
+      updateModeOptions(topicSortOptions, sort);
+      chrome.storage.local.set({ [TOPIC_TREE_SORT_KEY]: sort });
     });
   });
 
@@ -85,8 +128,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function updateModeOptions(modeOptions, activeMode) {
   modeOptions.forEach((option) => {
-    const isActive = option.dataset.dimMode === activeMode;
+    const optionValue = option.dataset.dimMode || option.dataset.topicOpenMode || option.dataset.topicTreeSort;
+    const isActive = optionValue === activeMode;
     option.classList.toggle("is-active", isActive);
     option.setAttribute("aria-pressed", String(isActive));
   });
+}
+
+function normalizeTopicTreeSort(sort) {
+  if (sort === TOPIC_TREE_SORT_TOP || sort === TOPIC_TREE_SORT_NEW || sort === TOPIC_TREE_SORT_OLD) {
+    return sort;
+  }
+
+  return TOPIC_TREE_SORT_OLD;
+}
+
+function updateTopicTreeSortVisibility(settingItem, topicMode) {
+  if (!settingItem) {
+    return;
+  }
+
+  settingItem.hidden = topicMode !== TOPIC_OPEN_MODE_TREE;
 }

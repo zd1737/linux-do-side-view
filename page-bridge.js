@@ -762,6 +762,64 @@ async function rewriteFetchRequestBody(originalFetch, context, request, pollMode
 }
 
 /**
+ * 判定该路径是否是 SideView 支持的帖子页面路由
+ */
+function isSupportedSideViewPath(path) {
+  return typeof path === "string" && (path.startsWith("/t/") || path.startsWith("/nested/topic/"));
+}
+
+/**
+ * 判定该路径是否是树形主题页
+ */
+function isNestedTopicPath(path) {
+  return typeof path === "string" && path.startsWith("/nested/topic/");
+}
+
+/**
+ * 强制将 iframe 内的页面滚动位置重置到顶部
+ */
+function resetIframeScrollPosition() {
+  try {
+    window.scrollTo(0, 0);
+  } catch {
+    // 忽略极端环境下的滚动错误
+  }
+
+  const scrollTargets = [
+    document.scrollingElement,
+    document.documentElement,
+    document.body
+  ];
+
+  for (const target of scrollTargets) {
+    if (!target) {
+      continue;
+    }
+
+    if (typeof target.scrollTo === "function") {
+      try {
+        target.scrollTo(0, 0);
+      } catch {
+        // 某些节点可能不支持调用 scrollTo
+      }
+    }
+
+    target.scrollTop = 0;
+    target.scrollLeft = 0;
+  }
+}
+
+/**
+ * SPA 导航后补几次滚动重置，兼容树形主题页延迟渲染导致的滚动残留
+ */
+function scheduleIframeScrollReset() {
+  resetIframeScrollPosition();
+  window.requestAnimationFrame(resetIframeScrollPosition);
+  window.setTimeout(resetIframeScrollPosition, 80);
+  window.setTimeout(resetIframeScrollPosition, 240);
+}
+
+/**
  * 初始化导航桥接：监听主页面发来的 postMessage，使用 Discourse SPA 路由进行导航
  * 此函数运行在 iframe 内的 MAIN world，可以访问 DiscourseURL 等页面全局变量
  */
@@ -799,13 +857,20 @@ function initNavigationBridge() {
     }
 
     const path = data.path;
-    if (typeof path !== "string" || !path.startsWith("/t/")) {
+    if (!isSupportedSideViewPath(path)) {
       return;
+    }
+
+    if (isNestedTopicPath(path)) {
+      scheduleIframeScrollReset();
     }
 
     // 优先使用 DiscourseURL.routeTo
     if (window.DiscourseURL && typeof window.DiscourseURL.routeTo === "function") {
       window.DiscourseURL.routeTo(path);
+      if (isNestedTopicPath(path)) {
+        scheduleIframeScrollReset();
+      }
       return;
     }
 
@@ -815,10 +880,16 @@ function initNavigationBridge() {
       const router = container.lookup("service:router");
       if (router && typeof router.transitionTo === "function") {
         router.transitionTo(path);
+        if (isNestedTopicPath(path)) {
+          scheduleIframeScrollReset();
+        }
         return;
       }
     }
 
+    if (isNestedTopicPath(path)) {
+      scheduleIframeScrollReset();
+    }
     window.location.href = path;
   });
 }
