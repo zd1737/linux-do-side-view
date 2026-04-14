@@ -6,6 +6,7 @@ const SIDEVIEW_OPEN_CLASS = "ds-sideview-open";
 const FAST_SIDEBAR_POLL_THRESHOLD_MS = 2_000;
 const MAX_CONSECUTIVE_FAST_SIDEBAR_POLLS = 3;
 const SIDEBAR_POLL_COOLDOWN_MS = 20_000;
+const SIDEBAR_POLL_BLOCKED_RESPONSE_DELAY_MS = 15_000;
 const XHR_META_KEY = "__dsSideviewXhrMeta";
 const POLL_MODE_BLOCKED = "blocked";
 const POLL_MODE_PRESENCE = "presence";
@@ -258,7 +259,7 @@ function interceptLocalStorage() {
 /**
  * 拦截 fetch 请求。
  * 回复态时放行原始 poll；回复结束后再放行一次普通 poll
- * 用于刷新最新消息；只有连续异常短轮询时才进入 20 秒冷却。
+ * 用于刷新最新消息；被拦截时返回延迟空响应，避免客户端立即高频重试。
  */
 function interceptFetch() {
   const originalFetch = window.fetch;
@@ -279,25 +280,25 @@ function interceptFetch() {
 
     const pollMode = getSidebarPollMode();
     if (pollMode === POLL_MODE_BLOCKED) {
-      return Promise.resolve(createBlockedFetchResponse());
+      return createDelayedBlockedFetchResponse(SIDEBAR_POLL_BLOCKED_RESPONSE_DELAY_MS);
     }
 
     if (hasOwnBody(init)) {
       const nextBody = filterSidebarPollBody(init.body, pollMode);
       if (nextBody === BODY_BLOCKED) {
-        return Promise.resolve(createBlockedFetchResponse());
+        return createDelayedBlockedFetchResponse(SIDEBAR_POLL_BLOCKED_RESPONSE_DELAY_MS);
       }
 
       if (nextBody === BODY_UNCHANGED) {
         if (shouldCooldownSidebarPoll(pollMode)) {
-          return Promise.resolve(createBlockedFetchResponse());
+          return createDelayedBlockedFetchResponse(getSidebarPollCooldownDelayMs());
         }
 
         return trackRealSidebarPollFetch(originalFetch.apply(this, arguments), pollMode);
       }
 
       if (shouldCooldownSidebarPoll(pollMode)) {
-        return Promise.resolve(createBlockedFetchResponse());
+        return createDelayedBlockedFetchResponse(getSidebarPollCooldownDelayMs());
       }
 
       return trackRealSidebarPollFetch(originalFetch.call(this, input, {
@@ -344,18 +345,18 @@ function interceptXhr() {
 
     const pollMode = getSidebarPollMode();
     if (pollMode === POLL_MODE_BLOCKED) {
-      resolveBlockedXhr(this, meta.url);
+      resolveBlockedXhr(this, meta.url, SIDEBAR_POLL_BLOCKED_RESPONSE_DELAY_MS);
       return;
     }
 
     const nextBody = filterSidebarPollBody(body, pollMode);
     if (nextBody === BODY_BLOCKED) {
-      resolveBlockedXhr(this, meta.url);
+      resolveBlockedXhr(this, meta.url, SIDEBAR_POLL_BLOCKED_RESPONSE_DELAY_MS);
       return;
     }
 
     if (shouldCooldownSidebarPoll(pollMode)) {
-      resolveBlockedXhr(this, meta.url);
+      resolveBlockedXhr(this, meta.url, getSidebarPollCooldownDelayMs());
       return;
     }
 
@@ -455,6 +456,10 @@ function isParentSideViewOpen() {
  */
 function shouldCooldownSidebarPoll(pollMode) {
   return pollMode !== POLL_MODE_FINAL_REFRESH && Date.now() < sidebarPollCooldownUntil;
+}
+
+function getSidebarPollCooldownDelayMs() {
+  return Math.max(0, sidebarPollCooldownUntil - Date.now());
 }
 
 /**
@@ -634,39 +639,60 @@ function createBlockedFetchResponse() {
   });
 }
 
+function createDelayedBlockedFetchResponse(delayMs) {
+  if (!delayMs || delayMs <= 0) {
+    return Promise.resolve(createBlockedFetchResponse());
+  }
+
+  return new Promise((resolve) => {
+    window.setTimeout(() => {
+      resolve(createBlockedFetchResponse());
+    }, delayMs);
+  });
+}
+
 /**
  * 为被拦截的 XHR 请求模拟一个成功的响应
  */
-function resolveBlockedXhr(xhr, rawUrl) {
-  const responseText = "[]";
-  const response = xhr.responseType === "json" ? [] : responseText;
-  const responseUrl = getAbsoluteUrl(rawUrl)?.toString() || window.location.href;
+function resolveBlockedXhr(xhr, rawUrl, delayMs = 0) {
+  const finalize = () => {
+    const responseText = "[]";
+    const response = xhr.responseType === "json" ? [] : responseText;
+    const responseUrl = getAbsoluteUrl(rawUrl)?.toString() || window.location.href;
 
-  defineGetter(xhr, "readyState", 4);
-  defineGetter(xhr, "status", 200);
-  defineGetter(xhr, "statusText", "OK");
-  defineGetter(xhr, "responseURL", responseUrl);
-  defineGetter(xhr, "response", response);
+    defineGetter(xhr, "readyState", 4);
+    defineGetter(xhr, "status", 200);
+    defineGetter(xhr, "statusText", "OK");
+    defineGetter(xhr, "responseURL", responseUrl);
+    defineGetter(xhr, "response", response);
 
-  if (xhr.responseType === "" || xhr.responseType === "text") {
-    defineGetter(xhr, "responseText", responseText);
+    if (xhr.responseType === "" || xhr.responseType === "text") {
+      defineGetter(xhr, "responseText", responseText);
+    }
+
+    xhr.getResponseHeader = function getResponseHeader(name) {
+      return typeof name === "string" && name.toLowerCase() === "content-type"
+        ? "application/json"
+        : null;
+    };
+
+    xhr.getAllResponseHeaders = function getAllResponseHeaders() {
+      return "content-type: application/json\r\n";
+    };
+
+    queueMicrotask(() => {
+      xhr.dispatchEvent(new Event("readystatechange"));
+      xhr.dispatchEvent(new Event("load"));
+      xhr.dispatchEvent(new ProgressEvent("loadend"));
+    });
+  };
+
+  if (delayMs > 0) {
+    window.setTimeout(finalize, delayMs);
+    return;
   }
 
-  xhr.getResponseHeader = function getResponseHeader(name) {
-    return typeof name === "string" && name.toLowerCase() === "content-type"
-      ? "application/json"
-      : null;
-  };
-
-  xhr.getAllResponseHeaders = function getAllResponseHeaders() {
-    return "content-type: application/json\r\n";
-  };
-
-  queueMicrotask(() => {
-    xhr.dispatchEvent(new Event("readystatechange"));
-    xhr.dispatchEvent(new Event("load"));
-    xhr.dispatchEvent(new ProgressEvent("loadend"));
-  });
+  finalize();
 }
 
 /**
@@ -728,33 +754,33 @@ function recordRealSidebarPollCompletion(startedAt, pollMode) {
 async function rewriteFetchRequestBody(originalFetch, context, request, pollMode) {
   const contentType = request.headers.get("content-type") || "";
   if (contentType && !contentType.includes("application/x-www-form-urlencoded")) {
-    return Promise.resolve(createBlockedFetchResponse());
+    return createDelayedBlockedFetchResponse(SIDEBAR_POLL_BLOCKED_RESPONSE_DELAY_MS);
   }
 
   try {
     const bodyText = await request.clone().text();
     const nextBody = filterSidebarPollBody(bodyText, pollMode);
     if (nextBody === BODY_BLOCKED) {
-      return createBlockedFetchResponse();
+      return createDelayedBlockedFetchResponse(SIDEBAR_POLL_BLOCKED_RESPONSE_DELAY_MS);
     }
 
     if (nextBody === BODY_UNCHANGED) {
       if (shouldCooldownSidebarPoll(pollMode)) {
-        return createBlockedFetchResponse();
+        return createDelayedBlockedFetchResponse(getSidebarPollCooldownDelayMs());
       }
 
       return trackRealSidebarPollFetch(originalFetch.call(context, request), pollMode);
     }
 
     if (shouldCooldownSidebarPoll(pollMode)) {
-      return createBlockedFetchResponse();
+      return createDelayedBlockedFetchResponse(getSidebarPollCooldownDelayMs());
     }
 
     const nextRequest = new Request(request, { body: nextBody });
     return trackRealSidebarPollFetch(originalFetch.call(context, nextRequest), pollMode);
   } catch {
     if (shouldCooldownSidebarPoll(pollMode)) {
-      return createBlockedFetchResponse();
+      return createDelayedBlockedFetchResponse(getSidebarPollCooldownDelayMs());
     }
 
     return trackRealSidebarPollFetch(originalFetch.call(context, request), pollMode);
