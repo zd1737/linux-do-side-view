@@ -41,16 +41,11 @@
 
 - 在 iframe 页面中尝试自动折叠 Discourse 左侧 sidebar，减少重复导航占位。
 - 拦截 iframe 内部对 `discourse_sidebar-hidden` 等 sidebar 状态的 `localStorage` 写入和删除。
-- 条件拦截发往 `ping.linux.do` 的 message-bus poll POST 请求，包括：
+- 改写 iframe 内发往 `ping.linux.do` 的 message-bus poll POST 请求，包括：
   - `fetch`
   - `XMLHttpRequest`
   - `navigator.sendBeacon`
-- 回复态时允许真实发送原始 poll，但会删掉 `/refresh-sidebar-sections`，避免影响主页面边栏状态。
-- 当最后一个 `.presence-users` 消失后，会额外放行 1 次普通 poll，用来刷新最新消息。
-- 一旦主页面点击关闭侧边 iframe，会立即禁止 iframe 内的真实 poll 请求。
-- 被拦截的 poll 不再立即返回空响应，而是延迟 15 秒后再返回，避免客户端立刻高频重试。
-- 如果真实 poll 连续 3 次都在 2 秒内结束，会触发 20 秒冷却；冷却期间会延迟到期后再返回空响应，防止异常持续请求。
-- 所有真实发送的 poll 都会移除表单里的 `/refresh-sidebar-sections` 频道，避免 iframe 内的交互污染主页面的全局 sidebar 状态。
+- 所有 poll 都会尽量保持原样发送，只移除表单里的 `/refresh-sidebar-sections` 频道，避免 iframe 内的交互污染主页面的全局 sidebar 状态。
 
 ### 弱化方案与阅读聚焦
 

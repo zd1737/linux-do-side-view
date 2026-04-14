@@ -1,21 +1,8 @@
 const HOSTNAME = "linux.do";
 const SIDEBAR_POLL_HOSTNAME = "ping.linux.do";
 const SIDEBAR_REFRESH_SECTIONS_CHANNEL = "/refresh-sidebar-sections";
-const PRESENCE_USERS_CLASS = "presence-users";
-const SIDEVIEW_OPEN_CLASS = "ds-sideview-open";
-const FAST_SIDEBAR_POLL_THRESHOLD_MS = 2_000;
-const MAX_CONSECUTIVE_FAST_SIDEBAR_POLLS = 3;
-const SIDEBAR_POLL_COOLDOWN_MS = 20_000;
-const SIDEBAR_POLL_BLOCKED_RESPONSE_DELAY_MS = 15_000;
 const XHR_META_KEY = "__dsSideviewXhrMeta";
-const POLL_MODE_BLOCKED = "blocked";
-const POLL_MODE_PRESENCE = "presence";
-const POLL_MODE_FINAL_REFRESH = "final-refresh";
-const BODY_BLOCKED = Symbol("dsSideviewBodyBlocked");
 const BODY_UNCHANGED = Symbol("dsSideviewBodyUnchanged");
-let allowOneTrailingSidebarPoll = false;
-let consecutiveFastSidebarPolls = 0;
-let sidebarPollCooldownUntil = 0;
 
 // 只在目标网站进行拦截
 if (window.location.hostname === HOSTNAME) {
@@ -257,9 +244,7 @@ function interceptLocalStorage() {
 }
 
 /**
- * 拦截 fetch 请求。
- * 回复态时放行原始 poll；回复结束后再放行一次普通 poll
- * 用于刷新最新消息；被拦截时返回延迟空响应，避免客户端立即高频重试。
+ * 拦截 fetch 请求，只在 poll 请求体里移除 sidebar 相关频道
  */
 function interceptFetch() {
   const originalFetch = window.fetch;
@@ -278,37 +263,20 @@ function interceptFetch() {
       return originalFetch.apply(this, arguments);
     }
 
-    const pollMode = getSidebarPollMode();
-    if (pollMode === POLL_MODE_BLOCKED) {
-      return createDelayedBlockedFetchResponse(SIDEBAR_POLL_BLOCKED_RESPONSE_DELAY_MS);
-    }
-
     if (hasOwnBody(init)) {
-      const nextBody = filterSidebarPollBody(init.body, pollMode);
-      if (nextBody === BODY_BLOCKED) {
-        return createDelayedBlockedFetchResponse(SIDEBAR_POLL_BLOCKED_RESPONSE_DELAY_MS);
-      }
-
+      const nextBody = filterSidebarPollBody(init.body);
       if (nextBody === BODY_UNCHANGED) {
-        if (shouldCooldownSidebarPoll(pollMode)) {
-          return createDelayedBlockedFetchResponse(getSidebarPollCooldownDelayMs());
-        }
-
-        return trackRealSidebarPollFetch(originalFetch.apply(this, arguments), pollMode);
+        return originalFetch.apply(this, arguments);
       }
 
-      if (shouldCooldownSidebarPoll(pollMode)) {
-        return createDelayedBlockedFetchResponse(getSidebarPollCooldownDelayMs());
-      }
-
-      return trackRealSidebarPollFetch(originalFetch.call(this, input, {
+      return originalFetch.call(this, input, {
         ...init,
         body: nextBody
-      }), pollMode);
+      });
     }
 
     if (request) {
-      return rewriteFetchRequestBody(originalFetch, this, request, pollMode);
+      return rewriteFetchRequestBody(originalFetch, this, request);
     }
 
     return originalFetch.apply(this, arguments);
@@ -316,14 +284,13 @@ function interceptFetch() {
 }
 
 /**
- * 拦截 XMLHttpRequest 请求，提取请求信息并判断是否需要拦截
+ * 拦截 XMLHttpRequest 请求，必要时改写 poll 请求体
  */
 function interceptXhr() {
   const originalOpen = XMLHttpRequest.prototype.open;
   const originalSend = XMLHttpRequest.prototype.send;
 
   XMLHttpRequest.prototype.open = function openWithSidebarSaveMeta(method, url) {
-    // 将请求基础信息存储在实例上，以便 send 方法中读取
     this[XHR_META_KEY] = {
       method,
       url: String(url)
@@ -343,25 +310,7 @@ function interceptXhr() {
       return originalSend.apply(this, arguments);
     }
 
-    const pollMode = getSidebarPollMode();
-    if (pollMode === POLL_MODE_BLOCKED) {
-      resolveBlockedXhr(this, meta.url, SIDEBAR_POLL_BLOCKED_RESPONSE_DELAY_MS);
-      return;
-    }
-
-    const nextBody = filterSidebarPollBody(body, pollMode);
-    if (nextBody === BODY_BLOCKED) {
-      resolveBlockedXhr(this, meta.url, SIDEBAR_POLL_BLOCKED_RESPONSE_DELAY_MS);
-      return;
-    }
-
-    if (shouldCooldownSidebarPoll(pollMode)) {
-      resolveBlockedXhr(this, meta.url, getSidebarPollCooldownDelayMs());
-      return;
-    }
-
-    attachRealSidebarPollXhrTracking(this, pollMode);
-
+    const nextBody = filterSidebarPollBody(body);
     if (nextBody !== BODY_UNCHANGED) {
       return originalSend.call(this, nextBody);
     }
@@ -371,7 +320,7 @@ function interceptXhr() {
 }
 
 /**
- * 拦截 navigator.sendBeacon 方法
+ * 拦截 navigator.sendBeacon 方法，必要时改写 poll 请求体
  */
 function interceptSendBeacon() {
   if (typeof navigator.sendBeacon !== "function") {
@@ -381,7 +330,7 @@ function interceptSendBeacon() {
   const originalSendBeacon = navigator.sendBeacon.bind(navigator);
   navigator.sendBeacon = function sendBeaconWithSidebarSaveIsolation(url, data) {
     const request = {
-      method: "POST", // sendBeacon 总是 POST
+      method: "POST",
       url: String(url)
     };
 
@@ -389,20 +338,7 @@ function interceptSendBeacon() {
       return originalSendBeacon(url, data);
     }
 
-    const pollMode = getSidebarPollMode();
-    if (pollMode === POLL_MODE_BLOCKED) {
-      return true;
-    }
-
-    const nextData = filterSidebarPollBody(data, pollMode);
-    if (nextData === BODY_BLOCKED) {
-      return true;
-    }
-
-    if (shouldCooldownSidebarPoll(pollMode)) {
-      return true;
-    }
-
+    const nextData = filterSidebarPollBody(data);
     if (nextData !== BODY_UNCHANGED) {
       return originalSendBeacon(url, nextData);
     }
@@ -412,77 +348,15 @@ function interceptSendBeacon() {
 }
 
 /**
- * 回复态时允许原始轮询，退出回复态后再放行一次普通 poll 用于刷新最新消息
+ * 过滤 poll 请求体，仅移除 sidebar 刷新频道
  */
-function getSidebarPollMode() {
-  if (!isParentSideViewOpen()) {
-    allowOneTrailingSidebarPoll = false;
-    consecutiveFastSidebarPolls = 0;
-    sidebarPollCooldownUntil = 0;
-    return POLL_MODE_BLOCKED;
-  }
-
-  if (hasPresenceUsersUi()) {
-    allowOneTrailingSidebarPoll = true;
-    return POLL_MODE_PRESENCE;
-  }
-
-  if (allowOneTrailingSidebarPoll) {
-    return POLL_MODE_FINAL_REFRESH;
-  }
-
-  return POLL_MODE_BLOCKED;
-}
-
-/**
- * 只有主页面侧边栏仍处于打开状态时，iframe 才允许继续发真实 poll
- */
-function isParentSideViewOpen() {
-  try {
-    return Boolean(
-      window.parent &&
-      window.parent !== window &&
-      window.parent.document &&
-      window.parent.document.documentElement &&
-      window.parent.document.documentElement.classList.contains(SIDEVIEW_OPEN_CLASS)
-    );
-  } catch {
-    return false;
-  }
-}
-
-/**
- * 只有连续异常短轮询时才进入冷却；final refresh 不受冷却限制
- */
-function shouldCooldownSidebarPoll(pollMode) {
-  return pollMode !== POLL_MODE_FINAL_REFRESH && Date.now() < sidebarPollCooldownUntil;
-}
-
-function getSidebarPollCooldownDelayMs() {
-  return Math.max(0, sidebarPollCooldownUntil - Date.now());
-}
-
-/**
- * presence-users UI 只是总开关，只有回复场景才允许进入实时轮询
- */
-function hasPresenceUsersUi() {
-  return document.getElementsByClassName(PRESENCE_USERS_CLASS).length > 0;
-}
-
-/**
- * 按当前轮询模式过滤 poll 请求体
- */
-function filterSidebarPollBody(body, pollMode) {
+function filterSidebarPollBody(body) {
   if (body == null) {
-    return BODY_BLOCKED;
+    return BODY_UNCHANGED;
   }
 
   if (typeof body === "string") {
-    const params = new URLSearchParams(body);
-    const filtered = collectFilteredSidebarPollEntries(params.entries());
-    if (!canSendFilteredSidebarPoll(filtered)) {
-      return BODY_BLOCKED;
-    }
+    const filtered = collectFilteredSidebarPollEntries(new URLSearchParams(body).entries());
     if (!filtered.changed) {
       return BODY_UNCHANGED;
     }
@@ -496,9 +370,6 @@ function filterSidebarPollBody(body, pollMode) {
 
   if (body instanceof URLSearchParams) {
     const filtered = collectFilteredSidebarPollEntries(body.entries());
-    if (!canSendFilteredSidebarPoll(filtered)) {
-      return BODY_BLOCKED;
-    }
     if (!filtered.changed) {
       return BODY_UNCHANGED;
     }
@@ -512,9 +383,6 @@ function filterSidebarPollBody(body, pollMode) {
 
   if (body instanceof FormData) {
     const filtered = collectFilteredSidebarPollEntries(body.entries());
-    if (!canSendFilteredSidebarPoll(filtered)) {
-      return BODY_BLOCKED;
-    }
     if (!filtered.changed) {
       return BODY_UNCHANGED;
     }
@@ -527,7 +395,7 @@ function filterSidebarPollBody(body, pollMode) {
     return nextBody;
   }
 
-  return BODY_BLOCKED;
+  return BODY_UNCHANGED;
 }
 
 /**
@@ -536,14 +404,10 @@ function filterSidebarPollBody(body, pollMode) {
 function collectFilteredSidebarPollEntries(entries) {
   const nextEntries = [];
   let changed = false;
-  let hasAnyChannel = false;
 
   for (const [key, value] of entries) {
     if (shouldKeepSidebarPollField(key)) {
       nextEntries.push([key, value]);
-      if (isPollChannelField(key)) {
-        hasAnyChannel = true;
-      }
     } else {
       changed = true;
     }
@@ -551,16 +415,8 @@ function collectFilteredSidebarPollEntries(entries) {
 
   return {
     entries: nextEntries,
-    changed,
-    hasAnyChannel
+    changed
   };
-}
-
-/**
- * 判定当前过滤结果是否仍然值得发真实请求
- */
-function canSendFilteredSidebarPoll(filtered) {
-  return filtered.hasAnyChannel;
 }
 
 /**
@@ -627,163 +483,25 @@ function getAbsoluteUrl(rawUrl) {
 }
 
 /**
- * 为被拦截的 fetch 请求构造一个默认的成功响应
- */
-function createBlockedFetchResponse() {
-  return new Response("[]", {
-    status: 200,
-    statusText: "OK",
-    headers: {
-      "Content-Type": "application/json"
-    }
-  });
-}
-
-function createDelayedBlockedFetchResponse(delayMs) {
-  if (!delayMs || delayMs <= 0) {
-    return Promise.resolve(createBlockedFetchResponse());
-  }
-
-  return new Promise((resolve) => {
-    window.setTimeout(() => {
-      resolve(createBlockedFetchResponse());
-    }, delayMs);
-  });
-}
-
-/**
- * 为被拦截的 XHR 请求模拟一个成功的响应
- */
-function resolveBlockedXhr(xhr, rawUrl, delayMs = 0) {
-  const finalize = () => {
-    const responseText = "[]";
-    const response = xhr.responseType === "json" ? [] : responseText;
-    const responseUrl = getAbsoluteUrl(rawUrl)?.toString() || window.location.href;
-
-    defineGetter(xhr, "readyState", 4);
-    defineGetter(xhr, "status", 200);
-    defineGetter(xhr, "statusText", "OK");
-    defineGetter(xhr, "responseURL", responseUrl);
-    defineGetter(xhr, "response", response);
-
-    if (xhr.responseType === "" || xhr.responseType === "text") {
-      defineGetter(xhr, "responseText", responseText);
-    }
-
-    xhr.getResponseHeader = function getResponseHeader(name) {
-      return typeof name === "string" && name.toLowerCase() === "content-type"
-        ? "application/json"
-        : null;
-    };
-
-    xhr.getAllResponseHeaders = function getAllResponseHeaders() {
-      return "content-type: application/json\r\n";
-    };
-
-    queueMicrotask(() => {
-      xhr.dispatchEvent(new Event("readystatechange"));
-      xhr.dispatchEvent(new Event("load"));
-      xhr.dispatchEvent(new ProgressEvent("loadend"));
-    });
-  };
-
-  if (delayMs > 0) {
-    window.setTimeout(finalize, delayMs);
-    return;
-  }
-
-  finalize();
-}
-
-/**
- * 辅助函数：快速定义对象只读属性
- */
-function defineGetter(target, key, value) {
-  Object.defineProperty(target, key, {
-    configurable: true,
-    enumerable: true,
-    get: () => value
-  });
-}
-
-/**
- * 记录 fetch 轮询的实际耗时，用于识别异常短轮询
- */
-function trackRealSidebarPollFetch(promise, pollMode) {
-  const startedAt = Date.now();
-  return Promise.resolve(promise).finally(() => {
-    recordRealSidebarPollCompletion(startedAt, pollMode);
-  });
-}
-
-/**
- * 记录 XHR 轮询的实际耗时，用于识别异常短轮询
- */
-function attachRealSidebarPollXhrTracking(xhr, pollMode) {
-  const startedAt = Date.now();
-  xhr.addEventListener("loadend", () => {
-    recordRealSidebarPollCompletion(startedAt, pollMode);
-  }, { once: true });
-}
-
-/**
- * 根据真实 poll 的持续时间决定是否进入冷却
- */
-function recordRealSidebarPollCompletion(startedAt, pollMode) {
-  if (pollMode === POLL_MODE_FINAL_REFRESH) {
-    allowOneTrailingSidebarPoll = false;
-  }
-
-  const duration = Date.now() - startedAt;
-  if (duration >= FAST_SIDEBAR_POLL_THRESHOLD_MS) {
-    consecutiveFastSidebarPolls = 0;
-    sidebarPollCooldownUntil = 0;
-    return;
-  }
-
-  consecutiveFastSidebarPolls += 1;
-  if (consecutiveFastSidebarPolls >= MAX_CONSECUTIVE_FAST_SIDEBAR_POLLS) {
-    consecutiveFastSidebarPolls = 0;
-    sidebarPollCooldownUntil = Date.now() + SIDEBAR_POLL_COOLDOWN_MS;
-  }
-}
-
-/**
  * 处理 fetch(Request) 这类 body 不在 init 里的请求
  */
-async function rewriteFetchRequestBody(originalFetch, context, request, pollMode) {
+async function rewriteFetchRequestBody(originalFetch, context, request) {
   const contentType = request.headers.get("content-type") || "";
   if (contentType && !contentType.includes("application/x-www-form-urlencoded")) {
-    return createDelayedBlockedFetchResponse(SIDEBAR_POLL_BLOCKED_RESPONSE_DELAY_MS);
+    return originalFetch.call(context, request);
   }
 
   try {
     const bodyText = await request.clone().text();
-    const nextBody = filterSidebarPollBody(bodyText, pollMode);
-    if (nextBody === BODY_BLOCKED) {
-      return createDelayedBlockedFetchResponse(SIDEBAR_POLL_BLOCKED_RESPONSE_DELAY_MS);
-    }
-
+    const nextBody = filterSidebarPollBody(bodyText);
     if (nextBody === BODY_UNCHANGED) {
-      if (shouldCooldownSidebarPoll(pollMode)) {
-        return createDelayedBlockedFetchResponse(getSidebarPollCooldownDelayMs());
-      }
-
-      return trackRealSidebarPollFetch(originalFetch.call(context, request), pollMode);
-    }
-
-    if (shouldCooldownSidebarPoll(pollMode)) {
-      return createDelayedBlockedFetchResponse(getSidebarPollCooldownDelayMs());
+      return originalFetch.call(context, request);
     }
 
     const nextRequest = new Request(request, { body: nextBody });
-    return trackRealSidebarPollFetch(originalFetch.call(context, nextRequest), pollMode);
+    return originalFetch.call(context, nextRequest);
   } catch {
-    if (shouldCooldownSidebarPoll(pollMode)) {
-      return createDelayedBlockedFetchResponse(getSidebarPollCooldownDelayMs());
-    }
-
-    return trackRealSidebarPollFetch(originalFetch.call(context, request), pollMode);
+    return originalFetch.call(context, request);
   }
 }
 
