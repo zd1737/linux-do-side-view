@@ -46,6 +46,7 @@
   - `XMLHttpRequest`
   - `navigator.sendBeacon`
 - 所有 poll 都会尽量保持原样发送，只移除表单里的 `/refresh-sidebar-sections` 频道，避免 iframe 内的交互污染主页面的全局 sidebar 状态。
+- 关闭侧边视图时会直接卸载 iframe，停止其中页面的脚本、定时器和网络请求；重新打开时再创建新的 iframe。
 
 ### 弱化方案与阅读聚焦
 

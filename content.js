@@ -581,12 +581,26 @@ function closeSideView() {
   document.documentElement.classList.remove(OPEN_CLASS);
   setPanelActiveState(false);
   panel.setAttribute("aria-hidden", "true");
-  iframeFirstLoaded = false; // 重置首次加载标记
+  teardownSideViewFrame(panel);
 
   // 恢复关闭前的滚动状态
   if (wasOpen) {
     restoreDocumentScroll(mainPaneScrollTop);
   }
+}
+
+/**
+ * 卸载侧边 iframe，彻底停止其中页面的脚本和网络活动
+ */
+function teardownSideViewFrame(panel) {
+  iframeFirstLoaded = false;
+
+  const iframe = panel.querySelector(`#${IFRAME_ID}`);
+  if (!(iframe instanceof HTMLIFrameElement)) {
+    return;
+  }
+
+  iframe.remove();
 }
 
 /**
