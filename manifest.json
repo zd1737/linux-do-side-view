@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Linux.do SideView",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "为 linux.do 提供左右分栏的话题阅读体验，在右侧内嵌面板快速预览帖子内容。",
   "permissions": [
     "storage"
