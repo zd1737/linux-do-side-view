@@ -40,6 +40,8 @@ html.ds-sideview-frame body::-webkit-scrollbar {
 html.ds-sideview-frame,
 html.ds-sideview-frame body {
   scrollbar-width: none;
+  overscroll-behavior: contain;
+  overscroll-behavior-y: contain;
 }
 
 /* 主页面保持原生 document 滚动，仅视觉隐藏右侧原生滚动条 */

@@ -1310,6 +1310,8 @@ html.${FRAME_CLASS},
 html.${FRAME_CLASS} body,
 html.${FRAME_CLASS} [${HIDE_NATIVE_SCROLLBAR_ATTR}="true"] {
   scrollbar-width: none !important;
+  overscroll-behavior: contain !important;
+  overscroll-behavior-y: contain !important;
 }
     `.trim();
   }
