@@ -609,7 +609,7 @@ function extractTopicIdFromUrl(url) {
     return match[1];
   }
 
-  match = url.pathname.match(/^\/nested\/topic\/(\d+)(?:\/|$)/);
+  match = url.pathname.match(/^\/n\/topic\/(\d+)(?:\/|$)/);
   if (match) {
     return match[1];
   }
@@ -622,12 +622,12 @@ function extractTopicIdFromUrl(url) {
  */
 function buildTopicOpenUrl(sourceUrl, topicId) {
   if (topicOpenMode === TOPIC_OPEN_MODE_TREE) {
-    const treeUrl = new URL(`/nested/topic/${topicId}`, window.location.origin);
+    const treeUrl = new URL(`/n/topic/${topicId}`, window.location.origin);
     treeUrl.searchParams.set("sort", topicTreeSort);
     return treeUrl.toString();
   }
 
-  if (sourceUrl.pathname.startsWith("/nested/topic/")) {
+  if (sourceUrl.pathname.startsWith("/n/topic/")) {
     return new URL(`/t/${topicId}`, window.location.origin).toString();
   }
 

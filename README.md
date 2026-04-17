@@ -18,7 +18,7 @@
 
 - 只拦截同源话题链接：
   - `/t/...`
-  - `/nested/topic/...`
+  - `/n/topic/...`
 - 只处理普通左键点击，不拦截：
   - 新标签/新窗口打开
   - 组合键点击
@@ -26,6 +26,7 @@
   - 窄屏窗口点击
 - 首次打开时直接设置 `iframe.src`。
 - 后续切换话题时通过 `postMessage` 通知 iframe 内部走 Discourse SPA 路由；失败时退回整页跳转。
+- 树形模式目标地址为 `/n/topic/{id}?sort={top|new|old}`。
 - 当前话题会高亮左侧对应的 topic 卡片。
 
 ### 布局与交互
@@ -122,6 +123,6 @@ ZIP 会排除 `README.md`、`assets/*` 和点文件。
 ## 限制
 
 - 只适配 `linux.do`
-- 只处理 `/t/...` 和 `/nested/topic/...`
+- 只处理 `/t/...` 和 `/n/topic/...`
 - 依赖当前 Discourse DOM 结构和 sidebar 选择器
 - 小于 `1100px` 的窗口不会启用分栏

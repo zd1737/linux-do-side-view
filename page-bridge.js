@@ -380,14 +380,14 @@ async function rewriteFetchRequestBody(originalFetch, context, request) {
  * 判定该路径是否是 SideView 支持的帖子页面路由
  */
 function isSupportedSideViewPath(path) {
-  return typeof path === "string" && (path.startsWith("/t/") || path.startsWith("/nested/topic/"));
+  return typeof path === "string" && (path.startsWith("/t/") || path.startsWith("/n/topic/"));
 }
 
 /**
  * 判定该路径是否是树形话题页
  */
 function isNestedTopicPath(path) {
-  return typeof path === "string" && path.startsWith("/nested/topic/");
+  return typeof path === "string" && path.startsWith("/n/topic/");
 }
 
 /**
