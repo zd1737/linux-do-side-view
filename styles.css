@@ -5,63 +5,74 @@
   --ds-sideview-shadow: -10px 0 30px rgba(0, 0, 0, 0.05); /* 左侧阴影，增加层次感 */
   --ds-sideview-resize-handle-width: 16px; /* 调整宽度的拖拽手柄可点击区域宽度 */
   --ds-sideview-resize-line-width: 4px; /* 拖拽手柄的可见线条宽度 */
+  --ds-scrollbar-width: 8px;
+  --ds-scrollbar-radius: 4px;
+  --ds-scrollbar-thumb-color: rgba(156, 163, 175, 0.5);
+  --ds-scrollbar-thumb-hover-color: rgba(107, 114, 128, 0.8);
   --ds-text-blend-strength: 0;
   --ds-main-topic-text-opacity: 1;
   --ds-frame-topic-text-opacity: 1;
 }
 
-/* 自定义滚动条样式，使其更优雅统一 */
-html.ds-sideview-open ::-webkit-scrollbar,
+/* iframe 内部如果出现额外滚动容器，沿用与主页面一致的滚动条样式 */
 html.ds-sideview-frame ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: var(--ds-scrollbar-width);
+  height: var(--ds-scrollbar-width);
 }
-html.ds-sideview-open ::-webkit-scrollbar-track,
 html.ds-sideview-frame ::-webkit-scrollbar-track {
   background: transparent;
 }
-html.ds-sideview-open ::-webkit-scrollbar-thumb,
 html.ds-sideview-frame ::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.5);
-  border-radius: 4px;
+  background-color: var(--ds-scrollbar-thumb-color);
+  border-radius: var(--ds-scrollbar-radius);
 }
-html.ds-sideview-open ::-webkit-scrollbar-thumb:hover,
 html.ds-sideview-frame ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(107, 114, 128, 0.8);
+  background-color: var(--ds-scrollbar-thumb-hover-color);
 }
 
-/* Firefox 浏览器的滚动条支持 */
-html.ds-sideview-open,
-html.ds-sideview-open body,
+/* iframe 根滚动条由假滚动条接管，原生只做视觉隐藏 */
+html.ds-sideview-frame::-webkit-scrollbar,
+html.ds-sideview-frame body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 html.ds-sideview-frame,
 html.ds-sideview-frame body {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+  scrollbar-width: none;
+}
+
+/* 主页面保持原生 document 滚动，仅视觉隐藏右侧原生滚动条 */
+html.ds-sideview-open::-webkit-scrollbar,
+html.ds-sideview-open body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+html.ds-sideview-open,
+html.ds-sideview-open body {
+  scrollbar-width: none;
 }
 
 /* 仅在屏幕宽度大于等于 1100px 时启用分栏样式 */
 @media (min-width: 1100px) {
-  /* 开启分栏时，固定 html 的高度并禁止其自身的滚动，滚动交给 body 处理 */
+  /* 开启分栏时保留 document 原生纵向滚动，只限制横向溢出 */
   html.ds-sideview-open {
-    height: 100vh !important;
-    overflow: hidden !important;
+    overflow-x: hidden !important;
   }
 
-  /* 调整主页面 body 的尺寸，为右侧侧边栏腾出空间 */
+  /* 调整主页面 body 的尺寸，为右侧侧边栏腾出空间，但不接管滚动 */
   html.ds-sideview-open body {
     box-sizing: border-box;
     width: calc(100vw - var(--ds-sideview-width)) !important;
     max-width: calc(100vw - var(--ds-sideview-width)) !important;
-    height: 100vh !important;
+    min-height: 100vh;
     margin-right: auto !important;
     padding-right: 0 !important;
-    overflow-y: auto !important; /* 允许纵向滚动 */
-    overflow-x: hidden !important; /* 隐藏横向滚动 */
-    overscroll-behavior: contain;
-    scrollbar-gutter: stable; /* 避免滚动条出现/消失导致页面跳动 */
+    overflow: visible !important;
   }
 
-  /* 处理 Discourse 顶栏，确保其在分栏模式下依然能正确吸顶并匹配新的宽度 */
+  /* 保持主页面顶部 header 常驻，避免根滚动触发站点自身的 header 隐藏动画 */
   html.ds-sideview-open .d-header-wrap {
     position: sticky !important;
     top: 0 !important;
@@ -69,6 +80,7 @@ html.ds-sideview-frame body {
     right: auto !important;
     width: 100% !important;
     max-width: 100% !important;
+    transform: none !important;
     z-index: 1000 !important;
   }
 
@@ -89,6 +101,92 @@ html.ds-sideview-frame body {
     width: 100% !important;
     max-width: 100% !important;
   }
+}
+
+/* 位于主页面与侧栏分界处的假滚动条，只负责显示和拖拽 */
+#ds-sideview-main-scrollbar {
+  position: fixed;
+  top: 0;
+  right: var(--ds-sideview-width);
+  z-index: 1000001;
+  width: var(--ds-scrollbar-width);
+  height: 100vh;
+  border-radius: var(--ds-scrollbar-radius);
+  background: transparent;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+}
+
+#ds-sideview-main-scrollbar-thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 0;
+  border-radius: var(--ds-scrollbar-radius);
+  background-color: var(--ds-scrollbar-thumb-color);
+  transform: translateY(0);
+  pointer-events: auto;
+  touch-action: none;
+  transition: background-color 0.18s ease, opacity 0.18s ease;
+}
+
+#ds-sideview-main-scrollbar-thumb:hover,
+html.ds-sideview-scrollbar-dragging #ds-sideview-main-scrollbar-thumb {
+  background-color: var(--ds-scrollbar-thumb-hover-color);
+}
+
+html.ds-sideview-open #ds-sideview-main-scrollbar {
+  opacity: 1;
+  visibility: visible;
+}
+
+html.ds-sideview-open #ds-sideview-main-scrollbar[data-ds-scrollable="false"] #ds-sideview-main-scrollbar-thumb {
+  opacity: 0;
+}
+
+/* iframe 右侧独立假滚动条 */
+#ds-sideview-frame-scrollbar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 2147483645;
+  width: var(--ds-scrollbar-width);
+  height: 100vh;
+  border-radius: var(--ds-scrollbar-radius);
+  background: transparent;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+}
+
+#ds-sideview-frame-scrollbar-thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 0;
+  border-radius: var(--ds-scrollbar-radius);
+  background-color: var(--ds-scrollbar-thumb-color);
+  transform: translateY(0);
+  pointer-events: auto;
+  touch-action: none;
+  transition: background-color 0.18s ease, opacity 0.18s ease;
+}
+
+#ds-sideview-frame-scrollbar-thumb:hover,
+html.ds-sideview-scrollbar-dragging #ds-sideview-frame-scrollbar-thumb {
+  background-color: var(--ds-scrollbar-thumb-hover-color);
+}
+
+html.ds-sideview-frame #ds-sideview-frame-scrollbar {
+  opacity: 1;
+  visibility: visible;
+}
+
+html.ds-sideview-frame #ds-sideview-frame-scrollbar[data-ds-scrollable="false"] #ds-sideview-frame-scrollbar-thumb {
+  opacity: 0;
 }
 
 /* 侧边阅读面板主体样式 */
@@ -175,6 +273,11 @@ html.ds-sideview-resizing body {
   user-select: none !important;
 }
 
+html.ds-sideview-scrollbar-dragging,
+html.ds-sideview-scrollbar-dragging body {
+  user-select: none !important;
+}
+
 /* 侧边面板开启状态，滑入屏幕并允许交互 */
 html.ds-sideview-open #ds-sideview-panel {
   visibility: visible;
@@ -182,53 +285,61 @@ html.ds-sideview-open #ds-sideview-panel {
   transform: translateX(0);
 }
 
-/* welcome banner 标题默认只显示左侧折叠箭头，展开后文字显示在右侧 */
-.welcome-banner__title.ds-welcome-banner-title-collapsible {
-  display: grid;
-  grid-template-columns: 20px 1fr;
-  grid-template-areas: "toggle content";
-  align-items: center;
-  column-gap: 10px;
-  cursor: pointer;
+/* welcome banner 标题默认折叠，仅左侧图标点击后展开 */
+.welcome-banner__title {
+  position: relative;
+  display: inline-block !important;
+  box-sizing: border-box;
+  inline-size: 30px !important;
+  min-inline-size: 30px !important;
+  max-inline-size: 30px !important;
+  min-block-size: 20px;
+  padding-inline-start: 30px !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  color: transparent !important;
+  text-shadow: none !important;
+  vertical-align: top;
+  cursor: default;
 }
 
-.welcome-banner__title.ds-welcome-banner-title-collapsible .ds-welcome-banner-title-toggle {
-  grid-area: toggle;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--primary-medium, #6b7280);
-  cursor: pointer;
-  appearance: none;
+.welcome-banner__title > * {
+  opacity: 0;
 }
 
-.welcome-banner__title.ds-welcome-banner-title-collapsible .ds-welcome-banner-title-toggle::before {
+.welcome-banner__title::before {
   content: "";
-  display: block;
+  position: absolute;
+  inset-inline-start: 6px;
+  top: 50%;
   width: 0;
   height: 0;
-  margin: 4px auto 0;
   border-top: 6px solid transparent;
   border-bottom: 6px solid transparent;
   border-left: 8px solid currentColor;
+  color: var(--primary-medium, #6b7280);
+  transform: translateY(-50%);
   transform-origin: 40% 50%;
   transition: transform 0.18s ease;
 }
 
-.welcome-banner__title.ds-welcome-banner-title-collapsible[data-ds-welcome-banner-collapsed="false"] .ds-welcome-banner-title-toggle::before {
-  transform: rotate(90deg);
+.welcome-banner__title[data-ds-welcome-banner-expanded="true"] {
+  inline-size: auto !important;
+  min-inline-size: 0 !important;
+  max-inline-size: min(80vw, calc(100vw - 48px)) !important;
+  overflow: visible !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  color: inherit !important;
+  z-index: 2;
 }
 
-.welcome-banner__title.ds-welcome-banner-title-collapsible .ds-welcome-banner-title-content {
-  grid-area: content;
-  min-width: 0;
-  cursor: pointer;
+.welcome-banner__title[data-ds-welcome-banner-expanded="true"] > * {
+  opacity: 1;
 }
 
-.welcome-banner__title.ds-welcome-banner-title-collapsible .ds-welcome-banner-title-content[hidden] {
-  display: none !important;
+.welcome-banner__title[data-ds-welcome-banner-expanded="true"]::before {
+  transform: translateY(-50%) rotate(90deg);
 }
 
 /* 底部工具栏（包含关闭按钮等） */

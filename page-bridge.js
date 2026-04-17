@@ -12,14 +12,14 @@ if (window.location.hostname === HOSTNAME) {
     // 监听来自主页面的 SPA 导航指令
     initNavigationBridge();
   } else {
-    // 处于主页面时，拦截滚动事件同步给虚拟滚动条
+    // 主页面保持原生 document scroll，仅保留一个显式标记位
     initMainPageScrollBridge();
   }
 }
 
 /**
- * 初始化主页面滚动拦截桥
- * 由于分栏模式下劫持了滚动区域到 body 上，导致 SPA 内部触发的页面置顶无法正确生效
+ * 初始化主页面桥接
+ * 分栏模式下不再接管主页面滚动，保留站点对原生 scroll API 的直接使用。
  */
 function initMainPageScrollBridge() {
   if (window.__dsSideviewMainScrollBridgeInstalled) {
@@ -27,135 +27,6 @@ function initMainPageScrollBridge() {
   }
 
   window.__dsSideviewMainScrollBridgeInstalled = true;
-
-  function isSideViewOpen() {
-    return document.documentElement && document.documentElement.classList.contains("ds-sideview-open");
-  }
-
-  function getVirtualScroller() {
-    return document.body;
-  }
-
-  // 1. 拦截 window.scrollTo, window.scroll, window.scrollBy
-  const windowMethods = ['scrollTo', 'scroll', 'scrollBy'];
-  windowMethods.forEach(method => {
-    const original = window[method];
-    if (typeof original === 'function') {
-      window[method] = function() {
-        original.apply(this, arguments);
-        if (isSideViewOpen()) {
-          const scroller = getVirtualScroller();
-          if (scroller) {
-            let top, left;
-            if (arguments.length === 1 && typeof arguments[0] === 'object' && arguments[0] !== null) {
-              top = arguments[0].top;
-              left = arguments[0].left;
-            } else if (arguments.length >= 2) {
-              left = arguments[0];
-              top = arguments[1];
-            }
-            
-            if (method === 'scrollBy') {
-              if (top !== undefined) scroller.scrollTop += top;
-              if (left !== undefined) scroller.scrollLeft += left;
-            } else {
-              if (top !== undefined) scroller.scrollTop = top;
-              if (left !== undefined) scroller.scrollLeft = left;
-            }
-          }
-        }
-      };
-    }
-  });
-
-  // 2. 拦截 Element.prototype.scrollTo, scroll, scrollBy (Discourse 可能调用 document.documentElement.scrollTo)
-  const elementMethods = ['scrollTo', 'scroll', 'scrollBy'];
-  elementMethods.forEach(method => {
-    const original = Element.prototype[method];
-    if (typeof original === 'function') {
-      Element.prototype[method] = function() {
-        if (isSideViewOpen() && (this === document.documentElement || this === document.scrollingElement)) {
-          const scroller = getVirtualScroller();
-          if (scroller) {
-            original.apply(scroller, arguments);
-            return;
-          }
-        }
-        original.apply(this, arguments);
-      };
-    }
-  });
-
-  // 3. 拦截 document.documentElement.scrollTop 的 getter 和 setter
-  try {
-    const originalDesc = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
-    if (originalDesc) {
-      Object.defineProperty(document.documentElement, 'scrollTop', {
-        get: function() {
-          if (isSideViewOpen()) {
-            const scroller = getVirtualScroller();
-            if (scroller) return scroller.scrollTop;
-          }
-          return originalDesc.get.call(this);
-        },
-        set: function(val) {
-          if (isSideViewOpen()) {
-            const scroller = getVirtualScroller();
-            if (scroller) {
-              scroller.scrollTop = val;
-              return;
-            }
-          }
-          originalDesc.set.call(this, val);
-        }
-      });
-    }
-  } catch(e) {
-    // 忽略无法重新定义的错误
-  }
-
-  // 4. 拦截 window.scrollY 和 window.pageYOffset 的 getter（修复可能的滚动位置监听，如无限下拉）
-  ['scrollY', 'pageYOffset'].forEach(prop => {
-    try {
-      const originalDesc = Object.getOwnPropertyDescriptor(window, prop) || Object.getOwnPropertyDescriptor(Window.prototype, prop);
-      if (originalDesc) {
-        Object.defineProperty(window, prop, {
-          get: function() {
-            if (isSideViewOpen()) {
-              const scroller = getVirtualScroller();
-              if (scroller) return scroller.scrollTop;
-            }
-            return originalDesc.get.call(this);
-          }
-        });
-      }
-    } catch(e) {
-      // 忽略无法重新定义的错误
-    }
-  });
-
-  // 5. 拦截 document.documentElement 的 scrollHeight 和 clientHeight
-  // 分栏模式下 html 被设为 height:100vh; overflow:hidden，导致 scrollHeight 等于视口高度
-  // Discourse 的无限滚动检查 scrollTop + innerHeight >= scrollHeight 时会始终为 true，不断触发加载
-  ['scrollHeight', 'clientHeight'].forEach(prop => {
-    try {
-      const originalDesc = Object.getOwnPropertyDescriptor(Element.prototype, prop);
-      if (originalDesc) {
-        Object.defineProperty(document.documentElement, prop, {
-          get: function() {
-            if (isSideViewOpen()) {
-              const scroller = getVirtualScroller();
-              if (scroller) return originalDesc.get.call(scroller);
-            }
-            return originalDesc.get.call(this);
-          },
-          configurable: true
-        });
-      }
-    } catch(e) {
-      // 忽略无法重新定义的错误
-    }
-  });
 }
 
 /**

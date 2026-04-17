@@ -6,16 +6,20 @@ const CLOSE_BUTTON_ID = "ds-sideview-close";
 const CLOSE_BUTTON_ICON_CLASS = "ds-sideview-close-icon";
 const CLOSE_BUTTON_LABEL_CLASS = "ds-sideview-close-label";
 const RESIZE_HANDLE_ID = "ds-sideview-resize-handle";
+const FAKE_SCROLLBAR_ID = "ds-sideview-main-scrollbar";
+const FAKE_SCROLLBAR_THUMB_ID = "ds-sideview-main-scrollbar-thumb";
+const FRAME_FAKE_SCROLLBAR_ID = "ds-sideview-frame-scrollbar";
+const FRAME_FAKE_SCROLLBAR_THUMB_ID = "ds-sideview-frame-scrollbar-thumb";
+const FRAME_SCROLLBAR_STYLE_ID = "ds-sideview-frame-scrollbar-style";
+const HIDE_NATIVE_SCROLLBAR_ATTR = "data-ds-hide-native-scrollbar";
 const OPEN_CLASS = "ds-sideview-open";
 const FRAME_CLASS = "ds-sideview-frame";
 const RESIZING_CLASS = "ds-sideview-resizing";
+const SCROLLBAR_DRAGGING_CLASS = "ds-sideview-scrollbar-dragging";
 const PANEL_ACTIVE_CLASS = "ds-sideview-panel-active";
 const WELCOME_BANNER_TITLE_SELECTOR = ".welcome-banner__title";
-const WELCOME_BANNER_TITLE_COLLAPSIBLE_CLASS = "ds-welcome-banner-title-collapsible";
-const WELCOME_BANNER_TITLE_TOGGLE_CLASS = "ds-welcome-banner-title-toggle";
-const WELCOME_BANNER_TITLE_CONTENT_CLASS = "ds-welcome-banner-title-content";
-const WELCOME_BANNER_TITLE_COLLAPSED_ATTR = "data-ds-welcome-banner-collapsed";
-const WELCOME_BANNER_TITLE_READY_ATTR = "data-ds-welcome-banner-ready";
+const WELCOME_BANNER_TITLE_EXPANDED_ATTR = "data-ds-welcome-banner-expanded";
+const WELCOME_BANNER_TOGGLE_HOTSPOT_WIDTH = 30;
 const TOPIC_OPEN_MODE_KEY = "ds-sideview-topic-open-mode";
 const TOPIC_OPEN_MODE_NORMAL = "normal";
 const TOPIC_OPEN_MODE_TREE = "tree";
@@ -31,6 +35,7 @@ const DIM_MODE_TEXT = "text";
 const MIN_SPLIT_WIDTH = 1100; // 启用分栏模式的最小窗口宽度
 const MIN_SIDEVIEW_WIDTH = 360; // 侧边栏最小宽度
 const MIN_MAIN_WIDTH = 360; // 主视图区域最小宽度
+const MIN_FAKE_SCROLLBAR_THUMB_HEIGHT = 24; // 假滚动条 thumb 的最小高度
 
 // 版本检测相关常量
 const UPDATE_CHECK_KEY = "ds-sideview-update-check";
@@ -56,9 +61,15 @@ const SIDEBAR_TOGGLE_SELECTORS = [
 
 // 全局状态变量
 let scheduleFrameLayout = null; // 用于防抖和调度 iframe 内部布局的方法
+let scheduleFakeScrollbarSync = null; // 用于同步假滚动条位置的方法
+let scheduleFrameFakeScrollbarSync = null; // 用于同步 iframe 假滚动条位置的方法
 let hasAttemptedSidebarCollapse = false; // 是否已经尝试过在 iframe 内折叠侧边栏
 let preferredSideViewWidth = null; // 用户偏好的侧边栏宽度
 let activeResize = null; // 当前拖拽调整宽度的状态
+let activeFakeScrollbarDrag = null; // 当前拖拽假滚动条的状态
+let activeFrameFakeScrollbarDrag = null; // 当前拖拽 iframe 假滚动条的状态
+let frameScrollElement = null; // iframe 当前实际滚动的元素
+let hiddenFrameScrollbarElement = null; // 当前被隐藏原生滚动条的 iframe 元素
 let iframeFirstLoaded = false; // iframe 是否已完成首次加载
 let activeTopicStyleElement = null; // 用于高亮当前阅读话题的 style 元素
 
@@ -89,9 +100,11 @@ function initTopLevel() {
   initStoredSideViewWidth();
   initDimSetting();
   initTopicOpenSetting();
-  initWelcomeBannerCollapse();
+  initWelcomeBannerTitleToggle();
+  scheduleFakeScrollbarSync = createRafScheduler(syncFakeScrollbar);
   // 监听全局点击事件，必须在捕获阶段拦截
   document.addEventListener("click", handleDocumentClick, true);
+  window.addEventListener("scroll", handleDocumentScroll, { passive: true });
 
   // 监听全局鼠标移动，以坐标判断是否位于右侧面板（取代 hover 和 iframe 内交互，解决 iframe 跨域失去 hover 的问题）
   document.addEventListener("mousemove", (event) => {
@@ -257,8 +270,12 @@ function applyDimClass() {
  */
 function initFrameMode() {
   initDimSetting();
-  initWelcomeBannerCollapse();
+  initWelcomeBannerTitleToggle();
   document.documentElement.classList.add(FRAME_CLASS);
+  scheduleFrameFakeScrollbarSync = createRafScheduler(syncFrameFakeScrollbar);
+  ensureFrameScrollbarStyle();
+  document.addEventListener("scroll", handleFrameScroll, true);
+  window.addEventListener("resize", handleFrameViewportResize);
   window.addEventListener("message", handleFrameVisualStateMessage);
 
   const scheduleLayout = createRafScheduler(syncIframeLayout);
@@ -280,80 +297,30 @@ function initFrameMode() {
 }
 
 /**
- * 初始化首页 welcome banner 标题的默认收缩/展开能力
+ * 初始化 welcome banner 标题左侧图标点击切换
  */
-function initWelcomeBannerCollapse() {
-  if (window.__dsWelcomeBannerCollapseInstalled) {
+function initWelcomeBannerTitleToggle() {
+  if (window.__dsWelcomeBannerTitleToggleInstalled) {
     return;
   }
 
-  window.__dsWelcomeBannerCollapseInstalled = true;
-
-  const scheduleSync = createRafScheduler(syncWelcomeBannerTitles);
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", scheduleSync, { once: true });
-  } else {
-    scheduleSync();
-  }
-
-  window.addEventListener("load", scheduleSync);
-  document.addEventListener("click", handleWelcomeBannerTitleClick, true);
-
-  const observer = new MutationObserver(() => {
-    scheduleSync();
-  });
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true
-  });
+  window.__dsWelcomeBannerTitleToggleInstalled = true;
+  document.addEventListener("click", handleWelcomeBannerTitleToggleClick, true);
 }
 
 /**
- * 扫描页面中的 welcome banner 标题并补齐默认收缩态
+ * 仅在点击标题左侧图标热区时切换展开/关闭
  */
-function syncWelcomeBannerTitles() {
-  document.querySelectorAll(WELCOME_BANNER_TITLE_SELECTOR).forEach(prepareWelcomeBannerTitle);
-}
-
-/**
- * 为 welcome banner 标题设置可折叠交互
- */
-function prepareWelcomeBannerTitle(title) {
-  if (!(title instanceof HTMLElement) || title.hasAttribute(WELCOME_BANNER_TITLE_READY_ATTR)) {
+function handleWelcomeBannerTitleToggleClick(event) {
+  if (!(event instanceof MouseEvent) || event.button !== 0) {
     return;
   }
 
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = WELCOME_BANNER_TITLE_TOGGLE_CLASS;
-
-  const content = document.createElement("div");
-  content.className = WELCOME_BANNER_TITLE_CONTENT_CLASS;
-
-  while (title.firstChild) {
-    content.appendChild(title.firstChild);
-  }
-
-  title.setAttribute(WELCOME_BANNER_TITLE_READY_ATTR, "true");
-  title.classList.add(WELCOME_BANNER_TITLE_COLLAPSIBLE_CLASS);
-  title.append(toggle, content);
-  setWelcomeBannerTitleCollapsed(title, true);
-}
-
-/**
- * 处理 welcome banner 标题区域点击，切换收缩状态
- */
-function handleWelcomeBannerTitleClick(event) {
   const title = event.target instanceof Element
     ? event.target.closest(WELCOME_BANNER_TITLE_SELECTOR)
     : null;
 
-  if (!title || !title.hasAttribute(WELCOME_BANNER_TITLE_READY_ATTR)) {
-    return;
-  }
-
-  if (event.target instanceof Element && event.target.closest("a, input, textarea, select")) {
+  if (!(title instanceof HTMLElement) || !isWelcomeBannerToggleHit(title, event)) {
     return;
   }
 
@@ -363,35 +330,18 @@ function handleWelcomeBannerTitleClick(event) {
     event.stopImmediatePropagation();
   }
 
-  toggleWelcomeBannerTitle(title);
+  const expanded = title.getAttribute(WELCOME_BANNER_TITLE_EXPANDED_ATTR) === "true";
+  title.setAttribute(WELCOME_BANNER_TITLE_EXPANDED_ATTR, expanded ? "false" : "true");
 }
 
 /**
- * 切换 welcome banner 标题展开状态
+ * 判断点击位置是否落在标题左侧的图标热区内
  */
-function toggleWelcomeBannerTitle(title) {
-  const isCollapsed = title.getAttribute(WELCOME_BANNER_TITLE_COLLAPSED_ATTR) !== "false";
-  setWelcomeBannerTitleCollapsed(title, !isCollapsed);
-}
+function isWelcomeBannerToggleHit(title, event) {
+  const rect = title.getBoundingClientRect();
+  const relativeX = event.clientX - rect.left;
 
-/**
- * 更新 welcome banner 标题的收缩态属性和辅助文本
- */
-function setWelcomeBannerTitleCollapsed(title, collapsed) {
-  const toggle = title.querySelector(`.${WELCOME_BANNER_TITLE_TOGGLE_CLASS}`);
-  const content = title.querySelector(`.${WELCOME_BANNER_TITLE_CONTENT_CLASS}`);
-
-  title.setAttribute(WELCOME_BANNER_TITLE_COLLAPSED_ATTR, collapsed ? "true" : "false");
-
-  if (content instanceof HTMLElement) {
-    content.hidden = collapsed;
-  }
-
-  if (toggle instanceof HTMLButtonElement) {
-    toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
-    toggle.setAttribute("aria-label", collapsed ? "展开欢迎横幅标题" : "收起欢迎横幅标题");
-    toggle.title = collapsed ? "展开" : "收起";
-  }
+  return relativeX >= 0 && relativeX <= WELCOME_BANNER_TOGGLE_HOTSPOT_WIDTH;
 }
 
 /**
@@ -444,6 +394,18 @@ function handleResize() {
   }
 
   applySideViewWidth(preferredSideViewWidth);
+  scheduleFakeScrollbarSync?.();
+}
+
+/**
+ * 处理主页面原生滚动，同步假滚动条 thumb 位置
+ */
+function handleDocumentScroll() {
+  if (!document.documentElement.classList.contains(OPEN_CLASS)) {
+    return;
+  }
+
+  scheduleFakeScrollbarSync?.();
 }
 
 /**
@@ -510,17 +472,16 @@ function openSideView(url) {
   const elements = ensurePanel();
   const wasOpen = document.documentElement.classList.contains(OPEN_CLASS);
 
-  // 在添加 OPEN_CLASS 之前获取真实的滚动高度，否则 page-bridge 拦截器会返回虚拟滚动条的值（而此时其尚未初始化，为 0）
-  const initialScrollTop = !wasOpen ? getDocumentScrollTop() : 0;
-
   applySideViewWidth(preferredSideViewWidth);
   document.documentElement.classList.add(OPEN_CLASS);
   elements.panel.setAttribute("aria-hidden", "false");
   syncSideViewFrameVisualState();
 
-  // 如果是从关闭状态打开的，将外部滚动条切换到主内容区域
   if (!wasOpen) {
-    transferDocumentScrollToMainPane(initialScrollTop);
+    scheduleFakeScrollbarSync?.();
+    window.requestAnimationFrame(() => {
+      scheduleFakeScrollbarSync?.();
+    });
   }
 
   // 高亮当前话题
@@ -574,19 +535,12 @@ function closeSideView() {
     return;
   }
 
-  const wasOpen = document.documentElement.classList.contains(OPEN_CLASS);
-  const mainPaneScrollTop = wasOpen ? getMainPaneScrollTop() : 0;
-
+  endFakeScrollbarDrag();
   endResize(false); // 取消可能的拖拽状态
   document.documentElement.classList.remove(OPEN_CLASS);
   setPanelActiveState(false);
   panel.setAttribute("aria-hidden", "true");
   teardownSideViewFrame(panel);
-
-  // 恢复关闭前的滚动状态
-  if (wasOpen) {
-    restoreDocumentScroll(mainPaneScrollTop);
-  }
 }
 
 /**
@@ -707,9 +661,11 @@ function ensurePanel() {
   let panel = document.getElementById(PANEL_ID);
   let iframe = document.getElementById(IFRAME_ID);
   let resizeHandle = document.getElementById(RESIZE_HANDLE_ID);
+  let fakeScrollbar = document.getElementById(FAKE_SCROLLBAR_ID);
+  let fakeScrollbarThumb = document.getElementById(FAKE_SCROLLBAR_THUMB_ID);
 
-  if (panel && iframe && resizeHandle) {
-    return { panel, iframe, resizeHandle };
+  if (panel && iframe && resizeHandle && fakeScrollbar && fakeScrollbarThumb) {
+    return { panel, iframe, resizeHandle, fakeScrollbar, fakeScrollbarThumb };
   }
 
   if (!panel) {
@@ -786,7 +742,28 @@ function ensurePanel() {
     document.body.appendChild(panel);
   }
 
-  return { panel, iframe, resizeHandle };
+  if (!fakeScrollbar) {
+    fakeScrollbar = document.createElement("div");
+    fakeScrollbar.id = FAKE_SCROLLBAR_ID;
+    fakeScrollbar.setAttribute("aria-hidden", "true");
+  }
+
+  if (!fakeScrollbarThumb) {
+    fakeScrollbarThumb = document.createElement("div");
+    fakeScrollbarThumb.id = FAKE_SCROLLBAR_THUMB_ID;
+    fakeScrollbarThumb.addEventListener("pointerdown", startFakeScrollbarDrag);
+    fakeScrollbar.appendChild(fakeScrollbarThumb);
+  }
+
+  if (fakeScrollbarThumb.parentElement !== fakeScrollbar) {
+    fakeScrollbar.appendChild(fakeScrollbarThumb);
+  }
+
+  if (!fakeScrollbar.isConnected) {
+    document.body.appendChild(fakeScrollbar);
+  }
+
+  return { panel, iframe, resizeHandle, fakeScrollbar, fakeScrollbarThumb };
 }
 
 /**
@@ -919,52 +896,192 @@ function endResize(shouldPersist) {
 function applySideViewWidth(width) {
   const nextWidth = clampSideViewWidth(width);
   document.documentElement.style.setProperty("--ds-sideview-width", `${nextWidth}px`);
+  if (document.documentElement.classList.contains(OPEN_CLASS)) {
+    scheduleFakeScrollbarSync?.();
+  }
   return nextWidth;
 }
 
 /**
- * 转移页面的滚动条控制权到左侧的主面板上，避免在分栏时发生异常滚动
+ * 获取当前页面原生滚动容器
  */
-function transferDocumentScrollToMainPane(scrollTop) {
-  window.requestAnimationFrame(() => {
-    window.scrollTo(0, 0);
-    setMainPaneScrollTop(scrollTop);
-  });
-}
-
-/**
- * 关闭侧边栏后，恢复页面级别的原始滚动条控制
- */
-function restoreDocumentScroll(scrollTop) {
-  window.requestAnimationFrame(() => {
-    setMainPaneScrollTop(0);
-    window.scrollTo(0, scrollTop);
-  });
+function getDocumentScroller() {
+  return document.scrollingElement || document.documentElement;
 }
 
 /**
  * 获取当前页面全局滚动条位置
  */
 function getDocumentScrollTop() {
-  return Math.max(window.scrollY, document.documentElement.scrollTop, document.body?.scrollTop || 0);
+  const scroller = getDocumentScroller();
+
+  if (!scroller) {
+    return Math.max(window.scrollY, document.documentElement.scrollTop, document.body?.scrollTop || 0);
+  }
+
+  return scroller.scrollTop;
 }
 
 /**
- * 获取主内容面板的滚动条位置
+ * 读取主页面原生滚动指标，供假滚动条映射使用
  */
-function getMainPaneScrollTop() {
-  return document.body?.scrollTop || 0;
+function getDocumentScrollMetrics() {
+  const scroller = getDocumentScroller();
+  const clientHeight = Math.max(
+    window.innerHeight || 0,
+    scroller?.clientHeight || 0,
+    document.documentElement.clientHeight || 0
+  );
+  const scrollHeight = Math.max(
+    scroller?.scrollHeight || 0,
+    document.documentElement.scrollHeight || 0,
+    document.body?.scrollHeight || 0
+  );
+  const scrollTop = Math.min(getDocumentScrollTop(), Math.max(scrollHeight - clientHeight, 0));
+
+  return {
+    clientHeight,
+    scrollHeight,
+    scrollTop,
+    maxScroll: Math.max(scrollHeight - clientHeight, 0)
+  };
 }
 
 /**
- * 设置主内容面板的滚动条位置
+ * 同步假滚动条 thumb 的可视位置和高度
  */
-function setMainPaneScrollTop(scrollTop) {
-  if (!document.body) {
+function syncFakeScrollbar() {
+  const fakeScrollbar = document.getElementById(FAKE_SCROLLBAR_ID);
+  const thumb = document.getElementById(FAKE_SCROLLBAR_THUMB_ID);
+  if (!(fakeScrollbar instanceof HTMLElement) || !(thumb instanceof HTMLElement)) {
     return;
   }
 
-  document.body.scrollTop = scrollTop;
+  const trackHeight = Math.round(fakeScrollbar.getBoundingClientRect().height);
+  const { clientHeight, scrollHeight, scrollTop, maxScroll } = getDocumentScrollMetrics();
+
+  if (trackHeight <= 0 || clientHeight <= 0 || scrollHeight <= clientHeight || maxScroll <= 0) {
+    fakeScrollbar.dataset.dsScrollable = "false";
+    thumb.style.height = "0px";
+    thumb.style.transform = "translateY(0px)";
+    return;
+  }
+
+  const thumbHeight = Math.min(
+    trackHeight,
+    Math.max(MIN_FAKE_SCROLLBAR_THUMB_HEIGHT, Math.round((trackHeight * clientHeight) / scrollHeight))
+  );
+  const maxThumbTravel = Math.max(trackHeight - thumbHeight, 0);
+  const thumbOffset = maxThumbTravel > 0
+    ? Math.round((scrollTop / maxScroll) * maxThumbTravel)
+    : 0;
+
+  fakeScrollbar.dataset.dsScrollable = "true";
+  thumb.style.height = `${thumbHeight}px`;
+  thumb.style.transform = `translateY(${thumbOffset}px)`;
+}
+
+/**
+ * 开始拖拽假滚动条 thumb，并将位移映射回 window.scrollTo(...)
+ */
+function startFakeScrollbarDrag(event) {
+  if (event.button !== 0) {
+    return;
+  }
+
+  const thumb = event.currentTarget;
+  if (!(thumb instanceof HTMLElement)) {
+    return;
+  }
+
+  const fakeScrollbar = document.getElementById(FAKE_SCROLLBAR_ID);
+  if (!(fakeScrollbar instanceof HTMLElement)) {
+    return;
+  }
+
+  const trackHeight = Math.round(fakeScrollbar.getBoundingClientRect().height);
+  const { maxScroll } = getDocumentScrollMetrics();
+  const thumbHeight = thumb.getBoundingClientRect().height;
+  const maxThumbTravel = Math.max(trackHeight - thumbHeight, 0);
+
+  if (trackHeight <= 0 || maxScroll <= 0 || maxThumbTravel <= 0) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  activeFakeScrollbarDrag = {
+    thumb,
+    pointerId: event.pointerId,
+    startClientY: event.clientY,
+    startScrollTop: getDocumentScrollTop(),
+    maxScroll,
+    maxThumbTravel
+  };
+
+  thumb.setPointerCapture(event.pointerId);
+  document.documentElement.classList.add(SCROLLBAR_DRAGGING_CLASS);
+  window.addEventListener("pointermove", handleFakeScrollbarDrag, true);
+  window.addEventListener("pointerup", stopFakeScrollbarDrag, true);
+  window.addEventListener("pointercancel", stopFakeScrollbarDrag, true);
+}
+
+/**
+ * 按 thumb 拖拽位移映射主页面原生滚动
+ */
+function handleFakeScrollbarDrag(event) {
+  if (!activeFakeScrollbarDrag || event.pointerId !== activeFakeScrollbarDrag.pointerId) {
+    return;
+  }
+
+  event.preventDefault();
+
+  const deltaY = event.clientY - activeFakeScrollbarDrag.startClientY;
+  const nextScrollTop = Math.min(
+    Math.max(
+      activeFakeScrollbarDrag.startScrollTop
+        + (deltaY / activeFakeScrollbarDrag.maxThumbTravel) * activeFakeScrollbarDrag.maxScroll,
+      0
+    ),
+    activeFakeScrollbarDrag.maxScroll
+  );
+
+  window.scrollTo(0, nextScrollTop);
+}
+
+/**
+ * 结束假滚动条拖拽
+ */
+function stopFakeScrollbarDrag(event) {
+  if (!activeFakeScrollbarDrag || event.pointerId !== activeFakeScrollbarDrag.pointerId) {
+    return;
+  }
+
+  event.preventDefault();
+  endFakeScrollbarDrag();
+}
+
+/**
+ * 清理假滚动条拖拽状态
+ */
+function endFakeScrollbarDrag() {
+  if (!activeFakeScrollbarDrag) {
+    return;
+  }
+
+  const { thumb, pointerId } = activeFakeScrollbarDrag;
+
+  if (thumb.hasPointerCapture(pointerId)) {
+    thumb.releasePointerCapture(pointerId);
+  }
+
+  activeFakeScrollbarDrag = null;
+  document.documentElement.classList.remove(SCROLLBAR_DRAGGING_CLASS);
+  window.removeEventListener("pointermove", handleFakeScrollbarDrag, true);
+  window.removeEventListener("pointerup", stopFakeScrollbarDrag, true);
+  window.removeEventListener("pointercancel", stopFakeScrollbarDrag, true);
+  scheduleFakeScrollbarSync?.();
 }
 
 /**
@@ -1117,20 +1234,369 @@ function handleFrameVisualStateMessage(event) {
 }
 
 /**
+ * iframe 内任意滚动发生时，记录实际滚动元素并同步假滚动条
+ */
+function handleFrameScroll(event) {
+  if (window.top === window) {
+    return;
+  }
+
+  if (event?.target instanceof Element && isFrameScrollableElement(event.target)) {
+    frameScrollElement = event.target;
+  } else {
+    frameScrollElement = getFrameRootScroller();
+  }
+
+  scheduleFrameFakeScrollbarSync?.();
+}
+
+/**
+ * iframe 视口尺寸变化时重新计算假滚动条
+ */
+function handleFrameViewportResize() {
+  if (window.top === window) {
+    return;
+  }
+
+  scheduleFrameFakeScrollbarSync?.();
+}
+
+/**
  * iframe 中更新布局相关的 class 和状态
  */
 function syncIframeLayout() {
   document.documentElement.classList.add(FRAME_CLASS);
+  ensureFrameScrollbarStyle();
+  ensureFrameFakeScrollbar();
 
   if (!document.body) {
     return;
   }
 
   document.body.classList.add(FRAME_CLASS);
+  scheduleFrameFakeScrollbarSync?.();
 
   if (!hasAttemptedSidebarCollapse) {
     collapseIframeSidebar();
   }
+}
+
+/**
+ * 在 iframe 内追加最后注入的滚动条覆盖样式，避免被站点自身样式覆盖
+ */
+function ensureFrameScrollbarStyle() {
+  if (window.top === window) {
+    return;
+  }
+
+  const styleRoot = document.head || document.documentElement;
+  if (!styleRoot) {
+    return;
+  }
+
+  let style = document.getElementById(FRAME_SCROLLBAR_STYLE_ID);
+  if (!(style instanceof HTMLStyleElement)) {
+    style = document.createElement("style");
+    style.id = FRAME_SCROLLBAR_STYLE_ID;
+    style.textContent = `
+html.${FRAME_CLASS}::-webkit-scrollbar,
+html.${FRAME_CLASS} body::-webkit-scrollbar,
+html.${FRAME_CLASS} [${HIDE_NATIVE_SCROLLBAR_ATTR}="true"]::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+}
+
+html.${FRAME_CLASS},
+html.${FRAME_CLASS} body,
+html.${FRAME_CLASS} [${HIDE_NATIVE_SCROLLBAR_ATTR}="true"] {
+  scrollbar-width: none !important;
+}
+    `.trim();
+  }
+
+  if (!style.isConnected) {
+    styleRoot.appendChild(style);
+  }
+}
+
+/**
+ * 确保 iframe 中存在独立的假滚动条
+ */
+function ensureFrameFakeScrollbar() {
+  let fakeScrollbar = document.getElementById(FRAME_FAKE_SCROLLBAR_ID);
+  let fakeScrollbarThumb = document.getElementById(FRAME_FAKE_SCROLLBAR_THUMB_ID);
+
+  if (fakeScrollbar && fakeScrollbarThumb) {
+    return { fakeScrollbar, fakeScrollbarThumb };
+  }
+
+  if (!fakeScrollbar) {
+    fakeScrollbar = document.createElement("div");
+    fakeScrollbar.id = FRAME_FAKE_SCROLLBAR_ID;
+    fakeScrollbar.setAttribute("aria-hidden", "true");
+  }
+
+  if (!fakeScrollbarThumb) {
+    fakeScrollbarThumb = document.createElement("div");
+    fakeScrollbarThumb.id = FRAME_FAKE_SCROLLBAR_THUMB_ID;
+    fakeScrollbarThumb.addEventListener("pointerdown", startFrameFakeScrollbarDrag);
+    fakeScrollbar.appendChild(fakeScrollbarThumb);
+  }
+
+  if (fakeScrollbarThumb.parentElement !== fakeScrollbar) {
+    fakeScrollbar.appendChild(fakeScrollbarThumb);
+  }
+
+  const mountRoot = document.body || document.documentElement;
+  if (mountRoot && !fakeScrollbar.isConnected) {
+    mountRoot.appendChild(fakeScrollbar);
+  }
+
+  return { fakeScrollbar, fakeScrollbarThumb };
+}
+
+/**
+ * 判定 iframe 中某个元素是否是有效的滚动容器
+ */
+function isFrameScrollableElement(element) {
+  if (!(element instanceof Element) || !element.isConnected) {
+    return false;
+  }
+
+  if (element.scrollHeight <= element.clientHeight + 1) {
+    return false;
+  }
+
+  if (element === document.documentElement || element === document.body || element === document.scrollingElement) {
+    return true;
+  }
+
+  const rect = element.getBoundingClientRect();
+  if (rect.height < Math.max(200, window.innerHeight * 0.5)) {
+    return false;
+  }
+
+  const style = window.getComputedStyle(element);
+  const overflowY = style.overflowY || style.overflow;
+  return /(auto|scroll|overlay)/.test(overflowY);
+}
+
+/**
+ * 获取 iframe 根滚动容器
+ */
+function getFrameRootScroller() {
+  return document.scrollingElement || document.documentElement || document.body;
+}
+
+/**
+ * 获取 iframe 当前实际滚动的元素
+ */
+function getFrameScrollElement() {
+  const candidates = [
+    frameScrollElement,
+    getFrameRootScroller(),
+    document.documentElement,
+    document.body
+  ];
+
+  for (const candidate of candidates) {
+    if (isFrameScrollableElement(candidate)) {
+      return candidate;
+    }
+  }
+
+  return getFrameRootScroller();
+}
+
+/**
+ * 根据当前滚动元素同步隐藏原生滚动条
+ */
+function syncHiddenFrameNativeScrollbar(scroller) {
+  if (hiddenFrameScrollbarElement && hiddenFrameScrollbarElement !== scroller) {
+    hiddenFrameScrollbarElement.removeAttribute(HIDE_NATIVE_SCROLLBAR_ATTR);
+    hiddenFrameScrollbarElement = null;
+  }
+
+  if (
+    scroller instanceof Element
+    && scroller !== document.documentElement
+    && scroller !== document.body
+    && scroller !== document.scrollingElement
+  ) {
+    scroller.setAttribute(HIDE_NATIVE_SCROLLBAR_ATTR, "true");
+    hiddenFrameScrollbarElement = scroller;
+  }
+}
+
+/**
+ * 读取 iframe 当前滚动元素的指标，供假滚动条映射使用
+ */
+function getFrameScrollMetrics() {
+  const scroller = getFrameScrollElement();
+  const isRootScroller =
+    scroller === document.scrollingElement
+    || scroller === document.documentElement
+    || scroller === document.body;
+  const clientHeight = Math.max(
+    isRootScroller ? window.innerHeight || 0 : 0,
+    scroller?.clientHeight || 0
+  );
+  const scrollHeight = Math.max(scroller?.scrollHeight || 0, 0);
+  const scrollTop = Math.min(scroller?.scrollTop || 0, Math.max(scrollHeight - clientHeight, 0));
+
+  return {
+    scroller,
+    isRootScroller,
+    clientHeight,
+    scrollHeight,
+    scrollTop,
+    maxScroll: Math.max(scrollHeight - clientHeight, 0)
+  };
+}
+
+/**
+ * 同步 iframe 假滚动条 thumb 的可视位置和高度
+ */
+function syncFrameFakeScrollbar() {
+  const elements = ensureFrameFakeScrollbar();
+  if (!elements) {
+    return;
+  }
+
+  const { fakeScrollbar, fakeScrollbarThumb } = elements;
+  const trackHeight = Math.round(fakeScrollbar.getBoundingClientRect().height);
+  const { scroller, clientHeight, scrollHeight, scrollTop, maxScroll } = getFrameScrollMetrics();
+
+  syncHiddenFrameNativeScrollbar(scroller);
+
+  if (trackHeight <= 0 || clientHeight <= 0 || scrollHeight <= clientHeight || maxScroll <= 0) {
+    fakeScrollbar.dataset.dsScrollable = "false";
+    fakeScrollbarThumb.style.height = "0px";
+    fakeScrollbarThumb.style.transform = "translateY(0px)";
+    return;
+  }
+
+  const thumbHeight = Math.min(
+    trackHeight,
+    Math.max(MIN_FAKE_SCROLLBAR_THUMB_HEIGHT, Math.round((trackHeight * clientHeight) / scrollHeight))
+  );
+  const maxThumbTravel = Math.max(trackHeight - thumbHeight, 0);
+  const thumbOffset = maxThumbTravel > 0
+    ? Math.round((scrollTop / maxScroll) * maxThumbTravel)
+    : 0;
+
+  fakeScrollbar.dataset.dsScrollable = "true";
+  fakeScrollbarThumb.style.height = `${thumbHeight}px`;
+  fakeScrollbarThumb.style.transform = `translateY(${thumbOffset}px)`;
+}
+
+/**
+ * 开始拖拽 iframe 假滚动条
+ */
+function startFrameFakeScrollbarDrag(event) {
+  if (event.button !== 0) {
+    return;
+  }
+
+  const thumb = event.currentTarget;
+  if (!(thumb instanceof HTMLElement)) {
+    return;
+  }
+
+  const fakeScrollbar = document.getElementById(FRAME_FAKE_SCROLLBAR_ID);
+  if (!(fakeScrollbar instanceof HTMLElement)) {
+    return;
+  }
+
+  const { scroller, isRootScroller, scrollTop, maxScroll } = getFrameScrollMetrics();
+  const trackHeight = Math.round(fakeScrollbar.getBoundingClientRect().height);
+  const thumbHeight = thumb.getBoundingClientRect().height;
+  const maxThumbTravel = Math.max(trackHeight - thumbHeight, 0);
+
+  if (!(scroller instanceof Element) || trackHeight <= 0 || maxScroll <= 0 || maxThumbTravel <= 0) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  activeFrameFakeScrollbarDrag = {
+    thumb,
+    pointerId: event.pointerId,
+    startClientY: event.clientY,
+    startScrollTop: scrollTop,
+    scroller,
+    isRootScroller,
+    maxScroll,
+    maxThumbTravel
+  };
+
+  thumb.setPointerCapture(event.pointerId);
+  document.documentElement.classList.add(SCROLLBAR_DRAGGING_CLASS);
+  window.addEventListener("pointermove", handleFrameFakeScrollbarDrag, true);
+  window.addEventListener("pointerup", stopFrameFakeScrollbarDrag, true);
+  window.addEventListener("pointercancel", stopFrameFakeScrollbarDrag, true);
+}
+
+/**
+ * 拖拽 iframe 假滚动条时映射回真实滚动
+ */
+function handleFrameFakeScrollbarDrag(event) {
+  if (!activeFrameFakeScrollbarDrag || event.pointerId !== activeFrameFakeScrollbarDrag.pointerId) {
+    return;
+  }
+
+  event.preventDefault();
+
+  const deltaY = event.clientY - activeFrameFakeScrollbarDrag.startClientY;
+  const nextScrollTop = Math.min(
+    Math.max(
+      activeFrameFakeScrollbarDrag.startScrollTop
+        + (deltaY / activeFrameFakeScrollbarDrag.maxThumbTravel) * activeFrameFakeScrollbarDrag.maxScroll,
+      0
+    ),
+    activeFrameFakeScrollbarDrag.maxScroll
+  );
+
+  if (activeFrameFakeScrollbarDrag.isRootScroller) {
+    window.scrollTo(0, nextScrollTop);
+  } else if (activeFrameFakeScrollbarDrag.scroller.isConnected) {
+    activeFrameFakeScrollbarDrag.scroller.scrollTop = nextScrollTop;
+  }
+}
+
+/**
+ * 结束拖拽 iframe 假滚动条
+ */
+function stopFrameFakeScrollbarDrag(event) {
+  if (!activeFrameFakeScrollbarDrag || event.pointerId !== activeFrameFakeScrollbarDrag.pointerId) {
+    return;
+  }
+
+  event.preventDefault();
+  endFrameFakeScrollbarDrag();
+}
+
+/**
+ * 清理 iframe 假滚动条拖拽状态
+ */
+function endFrameFakeScrollbarDrag() {
+  if (!activeFrameFakeScrollbarDrag) {
+    return;
+  }
+
+  const { thumb, pointerId } = activeFrameFakeScrollbarDrag;
+
+  if (thumb.hasPointerCapture(pointerId)) {
+    thumb.releasePointerCapture(pointerId);
+  }
+
+  activeFrameFakeScrollbarDrag = null;
+  document.documentElement.classList.remove(SCROLLBAR_DRAGGING_CLASS);
+  window.removeEventListener("pointermove", handleFrameFakeScrollbarDrag, true);
+  window.removeEventListener("pointerup", stopFrameFakeScrollbarDrag, true);
+  window.removeEventListener("pointercancel", stopFrameFakeScrollbarDrag, true);
+  scheduleFrameFakeScrollbarSync?.();
 }
 
 /**
