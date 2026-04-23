@@ -344,6 +344,16 @@ html.ds-sideview-open #ds-sideview-panel {
   transform: translateY(-50%) rotate(90deg);
 }
 
+/* 非 Horizon 视图下拉伸 welcome banner 搜索区域 */
+body:has(div.selected-name[data-name]:not([data-name="Horizon"])) .welcome-banner__wrap {
+  display: flex !important;
+}
+
+body:has(div.selected-name[data-name]:not([data-name="Horizon"])) .welcome-banner__wrap .search-menu {
+  width: 100% !important;
+  height: 75% !important;
+}
+
 /* 底部工具栏（包含关闭按钮等） */
 #ds-sideview-toolbar {
   position: absolute;
