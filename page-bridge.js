@@ -3,6 +3,10 @@ const SIDEBAR_POLL_HOSTNAME = "ping.linux.do";
 const SIDEBAR_REFRESH_SECTIONS_CHANNEL = "/refresh-sidebar-sections";
 const XHR_META_KEY = "__dsSideviewXhrMeta";
 const BODY_UNCHANGED = Symbol("dsSideviewBodyUnchanged");
+const SCROLL_RESET_OBSERVER_IDLE_MS = 1200;
+
+let scrollResetObserver = null;
+let scrollResetObserverStopTimer = null;
 
 // 只在目标网站进行拦截
 if (window.location.hostname === HOSTNAME) {
@@ -430,8 +434,61 @@ function resetIframeScrollPosition() {
 function scheduleIframeScrollReset() {
   resetIframeScrollPosition();
   window.requestAnimationFrame(resetIframeScrollPosition);
-  window.setTimeout(resetIframeScrollPosition, 80);
-  window.setTimeout(resetIframeScrollPosition, 240);
+  startScrollResetObservation();
+}
+
+/**
+ * 监听导航后的实际 DOM 变动，仅在内容继续渲染时补滚动重置，替代固定 timeout。
+ */
+function startScrollResetObservation() {
+  if (typeof MutationObserver !== "function") {
+    return;
+  }
+
+  if (!scrollResetObserver) {
+    scrollResetObserver = new MutationObserver((mutations) => {
+      const hasStructuralChange = mutations.some((mutation) =>
+        mutation.type === "childList"
+        && (mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0)
+      );
+
+      if (!hasStructuralChange) {
+        return;
+      }
+
+      resetIframeScrollPosition();
+      scheduleScrollResetObserverStop();
+    });
+
+    scrollResetObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true
+    });
+  }
+
+  scheduleScrollResetObserverStop();
+}
+
+function scheduleScrollResetObserverStop() {
+  if (scrollResetObserverStopTimer !== null) {
+    window.clearTimeout(scrollResetObserverStopTimer);
+  }
+
+  scrollResetObserverStopTimer = window.setTimeout(() => {
+    stopScrollResetObservation();
+  }, SCROLL_RESET_OBSERVER_IDLE_MS);
+}
+
+function stopScrollResetObservation() {
+  if (scrollResetObserver) {
+    scrollResetObserver.disconnect();
+    scrollResetObserver = null;
+  }
+
+  if (scrollResetObserverStopTimer !== null) {
+    window.clearTimeout(scrollResetObserverStopTimer);
+    scrollResetObserverStopTimer = null;
+  }
 }
 
 /**
@@ -445,20 +502,29 @@ function initNavigationBridge() {
 
   window.__dsSideviewNavigationBridgeInstalled = true;
 
-  // 监听用户交互并通知父页面，用于控制遮罩状态
-  const notifyInteraction = (event) => {
-    // 传递光标的屏幕X坐标（相对于视口）
-    const x = event.clientX;
-    window.parent.postMessage({ type: "ds-iframe-interaction", x: x }, window.location.origin);
+  const notifyParentPanelActivity = (active) => {
+    window.parent.postMessage({
+      type: "ds-iframe-activity-change",
+      active: Boolean(active)
+    }, window.location.origin);
   };
-  
-  window.addEventListener("mousemove", notifyInteraction, { passive: true });
-  // 也监听点击和按键等交互，如果有交互，默认鼠标在右侧
-  const notifyActive = () => {
-    window.parent.postMessage({ type: "ds-iframe-interaction", x: window.innerWidth / 2 }, window.location.origin);
-  };
-  window.addEventListener("click", notifyActive, { passive: true });
-  window.addEventListener("keydown", notifyActive, { passive: true });
+
+  // 使用进入/焦点/明确交互等低频事件通知父页面，不再持续回传 mousemove。
+  document.documentElement.addEventListener("pointerenter", () => {
+    notifyParentPanelActivity(true);
+  }, { passive: true });
+  document.documentElement.addEventListener("pointerleave", () => {
+    notifyParentPanelActivity(false);
+  }, { passive: true });
+  window.addEventListener("click", () => {
+    notifyParentPanelActivity(true);
+  }, { passive: true });
+  window.addEventListener("keydown", () => {
+    notifyParentPanelActivity(true);
+  }, { passive: true });
+  document.addEventListener("focusin", () => {
+    notifyParentPanelActivity(true);
+  });
 
   window.addEventListener("message", (event) => {
     // 只接受同源消息

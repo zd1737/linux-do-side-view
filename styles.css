@@ -552,13 +552,11 @@ html.ds-dim-enabled.ds-sideview-open[data-ds-dim-mode="mask"] #ds-sideview-mask 
 }
 
 /* 右侧面板处于交互态时切换遮罩 */
-html.ds-dim-enabled.ds-sideview-open[data-ds-dim-mode="mask"].ds-sideview-panel-active #ds-main-mask,
-html.ds-dim-enabled.ds-sideview-open[data-ds-dim-mode="mask"]:has(#ds-sideview-panel:hover) #ds-main-mask {
+html.ds-dim-enabled.ds-sideview-open[data-ds-dim-mode="mask"].ds-sideview-panel-active #ds-main-mask {
   opacity: 1; /* 鼠标或焦点在右侧面板时，遮罩左侧主面板 */
 }
 
-html.ds-dim-enabled.ds-sideview-open[data-ds-dim-mode="mask"].ds-sideview-panel-active #ds-sideview-mask,
-html.ds-dim-enabled.ds-sideview-open[data-ds-dim-mode="mask"]:has(#ds-sideview-panel:hover) #ds-sideview-mask {
+html.ds-dim-enabled.ds-sideview-open[data-ds-dim-mode="mask"].ds-sideview-panel-active #ds-sideview-mask {
   opacity: 0; /* 鼠标或焦点在右侧面板时，取消右侧自身的遮罩 */
   visibility: hidden;
 }
